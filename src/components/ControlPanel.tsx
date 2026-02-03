@@ -23,7 +23,7 @@ export function ControlPanel() {
           onChange={(e) =>
             setProcessingConfig({ targetSize: parseInt(e.target.value, 10) })
           }
-          className="w-full"
+          className="w-full accent-gray-900"
         />
       </div>
 
@@ -39,7 +39,7 @@ export function ControlPanel() {
           onChange={(e) =>
             setProcessingConfig({ colorCount: parseInt(e.target.value, 10) })
           }
-          className="w-full"
+          className="w-full accent-gray-900"
         />
       </div>
 
@@ -56,7 +56,7 @@ export function ControlPanel() {
           onChange={(e) =>
             setProcessingConfig({ smoothingAmount: parseFloat(e.target.value) })
           }
-          className="w-full"
+          className="w-full accent-gray-900"
         />
       </div>
 
@@ -73,7 +73,7 @@ export function ControlPanel() {
           onChange={(e) =>
             setProcessingConfig({ simplifyAmount: parseFloat(e.target.value) })
           }
-          className="w-full"
+          className="w-full accent-gray-900"
         />
       </div>
 
@@ -90,7 +90,7 @@ export function ControlPanel() {
           onChange={(e) =>
             setProcessingConfig({ minRegionSize: parseInt(e.target.value, 10) })
           }
-          className="w-full"
+          className="w-full accent-gray-900"
         />
       </div>
 
@@ -99,7 +99,7 @@ export function ControlPanel() {
           type="checkbox"
           checked={processingConfig.useDmcPalette}
           onChange={(e) => setProcessingConfig({ useDmcPalette: e.target.checked })}
-          className="h-4 w-4"
+          className="h-4 w-4 accent-gray-900"
         />
         Map palette to DMC thread colors
       </label>
