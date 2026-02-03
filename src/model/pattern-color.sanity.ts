@@ -49,6 +49,9 @@ export function runPatternColorSanityTest() {
     smoothingAmount: 0,
     simplifyAmount: 0,
     minRegionSize: 1,
+    fabricColor: { r: 245, g: 245, b: 220 },
+    stitchThreshold: 0.1,
+    organicPreview: false,
   })
 
   const palette = pattern.rawPalette
@@ -78,4 +81,3 @@ export function runPatternColorSanityTest() {
 
   console.info('[Magpie][PatternColorSanity] PASS', { palette })
 }
-

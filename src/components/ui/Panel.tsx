@@ -1,7 +1,8 @@
 import type { HTMLAttributes, ReactNode } from 'react'
 import { cn } from './cn'
 
-export interface PanelProps extends HTMLAttributes<HTMLDivElement> {
+export interface PanelProps
+  extends Omit<HTMLAttributes<HTMLDivElement>, 'title'> {
   variant?: 'default' | 'inset'
   elevated?: boolean
   title?: ReactNode
@@ -43,4 +44,3 @@ export function Panel({
     </section>
   )
 }
-

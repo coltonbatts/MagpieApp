@@ -13,7 +13,7 @@ export function processOrganicRegions(
     height: number,
     paletteHex: string[],
     fabricColor: RGBColor,
-    threshold: number,
+    _threshold: number,
     _minRegionSize: number
 ): { labels: Uint16Array; fabricLabel: number } {
     // 1. Find connected components
@@ -26,19 +26,16 @@ export function processOrganicRegions(
         srgbToLinear(fabricColor.b)
     )
 
-    // The threshold is 0..1, we compare against OkLab distance squared.
-    const thresholdSq = threshold * threshold
-
     regionColors.forEach((colorIdx, _componentId) => {
-        const hex = paletteHex[colorIdx]
-        const rgb = hexToRgb(hex)
-        const lab = linearRgbToOkLab(srgbToLinear(rgb.r), srgbToLinear(rgb.g), srgbToLinear(rgb.b))
+      const hex = paletteHex[colorIdx]
+      const rgb = hexToRgb(hex)
+      const lab = linearRgbToOkLab(srgbToLinear(rgb.r), srgbToLinear(rgb.g), srgbToLinear(rgb.b))
 
-        const _distSq = okLabDistanceSqWeighted(
-            lab[0], lab[1], lab[2],
-            fabricOkLab[0], fabricOkLab[1], fabricOkLab[2],
-            1.35 // wL
-        )
+      okLabDistanceSqWeighted(
+        lab[0], lab[1], lab[2],
+        fabricOkLab[0], fabricOkLab[1], fabricOkLab[2],
+        1.35 // wL
+      )
         // Classification logic would go here if we were re-mapping
     })
 
