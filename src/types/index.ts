@@ -62,11 +62,17 @@ export interface ProcessingConfig {
   smoothingAmount: number // 0..1
   simplifyAmount: number // 0..1
   minRegionSize: number // pixels (connected component size)
+  fabricColor: RGBColor
+  stitchThreshold: number // 0..1 (distance to fabric color)
+  organicPreview: boolean
 }
 
 export interface ViewerConfig {
   showGrid: boolean
   showMarkers: boolean
+  showFabric: boolean
+  showOutlines: boolean
+  showLabels: boolean
   zoomMin: number
   zoomMax: number
 }

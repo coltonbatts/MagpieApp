@@ -1,14 +1,18 @@
 import { usePatternStore } from '@/store/pattern-store'
 
 export function Legend() {
-  const { pattern } = usePatternStore()
+  const { pattern, processingConfig } = usePatternStore()
   const isDev = import.meta.env.DEV
 
   if (!pattern) {
     return <p className="text-sm text-gray-500">Upload an image to see legend</p>
   }
-
-  const legend = pattern.getLegend()
+  const legend = pattern.getLegend({
+    fabricConfig: {
+      fabricColor: processingConfig.fabricColor,
+      stitchThreshold: processingConfig.stitchThreshold
+    }
+  })
 
   return (
     <div className="space-y-2">

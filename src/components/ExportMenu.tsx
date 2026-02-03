@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useExport } from '@/hooks/useExport'
 import { usePatternStore } from '@/store/pattern-store'
 import { exportLegendCsv } from '@/exports/csv-export'
+import { generatePatternSVG } from '@/exports/pattern-svg-export'
 
 export function ExportMenu() {
   const [includeGrid, setIncludeGrid] = useState(true)
@@ -12,11 +13,13 @@ export function ExportMenu() {
   const [exportError, setExportError] = useState<string | null>(null)
   const [isExportingPng, setIsExportingPng] = useState(false)
   const [isExportingCsv, setIsExportingCsv] = useState(false)
+  const [isExportingSvg, setIsExportingSvg] = useState(false)
   const isDev = import.meta.env.DEV
   const pattern = usePatternStore((state) => state.pattern)
+  const processingConfig = usePatternStore((state) => state.processingConfig)
   const { canExport, exportCurrentPng } = useExport()
 
-  const exportDisabled = !canExport || isExportingPng || isExportingCsv
+  const exportDisabled = !canExport || isExportingPng || isExportingCsv || isExportingSvg
 
   const shortcutHint = useMemo(() => {
     const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform)
@@ -70,7 +73,7 @@ export function ExportMenu() {
       setExportError(null)
       setStatusNote(null)
       setIsExportingCsv(true)
-      const result = exportLegendCsv(pattern)
+      const result = exportLegendCsv(pattern, processingConfig)
       setStatusNote(`Downloaded ${result.fileName}`)
     } catch (error) {
       const message =
@@ -81,6 +84,30 @@ export function ExportMenu() {
       setIsExportingCsv(false)
     }
   }, [pattern])
+
+  const handleExportSvg = useCallback(() => {
+    if (!pattern) return
+    try {
+      setExportError(null)
+      setStatusNote(null)
+      setIsExportingSvg(true)
+      const svg = generatePatternSVG(pattern, processingConfig)
+      const blob = new Blob([svg], { type: 'image/svg+xml' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `magpie-pattern-${Date.now()}.svg`
+      link.click()
+      URL.revokeObjectURL(url)
+      setStatusNote(`Downloaded SVG pattern`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown SVG export failure.'
+      console.error('svg export failed', { reason: message })
+      setExportError(message)
+    } finally {
+      setIsExportingSvg(false)
+    }
+  }, [pattern, processingConfig])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -155,6 +182,15 @@ export function ExportMenu() {
           className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
         >
           {isExportingCsv ? 'Downloading…' : 'Download Palette/Thread List CSV'}
+        </button>
+
+        <button
+          type="button"
+          onClick={handleExportSvg}
+          disabled={exportDisabled}
+          className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {isExportingSvg ? 'Downloading…' : 'Download Printable Pattern SVG'}
         </button>
       </div>
 

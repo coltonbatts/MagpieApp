@@ -39,11 +39,24 @@ export default function App() {
     const nextPattern = processingConfig.useDmcPalette
       ? rawPattern.withDmcPaletteMapping()
       : rawPattern
-    setPattern(nextPattern)
+
+    // Ensure the pattern knows about the current fabric settings for its legend
+    const patternWithFabric = new Pattern(nextPattern.stitches, nextPattern.width, nextPattern.height, {
+      ...nextPattern,
+      // @ts-ignore - passing extra context for the legend
+      fabricConfig: {
+        fabricColor: processingConfig.fabricColor,
+        stitchThreshold: processingConfig.stitchThreshold
+      }
+    })
+
+    setPattern(patternWithFabric)
   }, [
     normalizedImage,
     processingConfig,
     processingConfig.useDmcPalette,
+    processingConfig.fabricColor,
+    processingConfig.stitchThreshold,
     setPattern,
   ])
 
@@ -81,7 +94,7 @@ export default function App() {
         </div>
       )}
       <Layout
-        viewer={<PatternViewer pattern={pattern} showGrid={true} />}
+        viewer={<PatternViewer pattern={pattern} />}
         controls={<ControlPanel />}
         legend={<Legend />}
       />

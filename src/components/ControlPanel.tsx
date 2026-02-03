@@ -2,6 +2,7 @@ import { PROCESSING } from '@/lib/constants'
 import { usePatternStore } from '@/store/pattern-store'
 import { UploadZone } from './UploadZone'
 import { ExportMenu } from './ExportMenu'
+import { FabricPanel } from './FabricPanel'
 
 export function ControlPanel() {
   const { processingConfig, isProcessing, error, setProcessingConfig } =
@@ -10,6 +11,7 @@ export function ControlPanel() {
   return (
     <div className="space-y-6">
       <UploadZone />
+      <FabricPanel />
 
       <div>
         <label className="mb-2 block text-sm font-medium text-gray-700">
@@ -103,6 +105,18 @@ export function ControlPanel() {
         />
         Map palette to DMC thread colors
       </label>
+
+      <div className="space-y-4 pt-2 border-t border-gray-100">
+        <label className="flex items-center gap-2 text-sm text-gray-700">
+          <input
+            type="checkbox"
+            checked={processingConfig.organicPreview}
+            onChange={(e) => setProcessingConfig({ organicPreview: e.target.checked })}
+            className="h-4 w-4 accent-gray-900"
+          />
+          Organic Preview (Curved Regions)
+        </label>
+      </div>
 
       <ExportMenu />
 

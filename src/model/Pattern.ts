@@ -1,6 +1,7 @@
-import type { DmcMetadata, LegendEntry, PaletteMappingEntry, ProcessingConfig, Stitch } from '@/types'
+import type { DmcMetadata, LegendEntry, PaletteMappingEntry, ProcessingConfig, Stitch, RGBColor } from '@/types'
 import { mapPaletteToDmc } from '@/palette/matcher'
 import { quantizeImageToPalette } from '@/processing/pattern-pipeline'
+import { linearRgbToOkLab, okLabDistanceSqWeighted } from '@/processing/color-spaces'
 
 // Pattern is the immutable stitch-grid output of quantization:
 // one stitch per pixel in the normalized source image.
@@ -13,6 +14,8 @@ export class Pattern {
   activePaletteMode: 'raw' | 'dmc'
   mappingTable: PaletteMappingEntry[]
   dmcMetadataByMappedHex: Record<string, DmcMetadata>
+  labels: Uint16Array | null
+  paletteHex: string[] | null
 
   constructor(
     stitches: Stitch[],
@@ -24,6 +27,8 @@ export class Pattern {
       activePaletteMode?: 'raw' | 'dmc'
       mappingTable?: PaletteMappingEntry[]
       dmcMetadataByMappedHex?: Record<string, DmcMetadata>
+      labels?: Uint16Array | null
+      paletteHex?: string[] | null
     }
   ) {
     this.stitches = stitches
@@ -34,9 +39,11 @@ export class Pattern {
     this.activePaletteMode = options?.activePaletteMode ?? 'raw'
     this.mappingTable = options?.mappingTable ?? []
     this.dmcMetadataByMappedHex = options?.dmcMetadataByMappedHex ?? {}
+    this.labels = options?.labels ?? null
+    this.paletteHex = options?.paletteHex ?? null
   }
 
-  getLegend(): LegendEntry[] {
+  getLegend(options?: { fabricConfig?: { fabricColor: RGBColor, stitchThreshold: number } }): LegendEntry[] {
     const counts = new Map<string, number>()
     const isMappedToDmc = this.activePaletteMode === 'dmc'
     const totalStitches = this.stitches.length || 1
@@ -47,6 +54,8 @@ export class Pattern {
       originals.push(entry.originalHex)
       originalsByMappedHex.set(entry.mappedHex, originals)
     })
+
+    const fabricIndices = this.getFabricIndices(options?.fabricConfig)
 
     this.stitches.forEach((stitch) => {
       const stitchHex = normalizeHex(stitch.hex)
@@ -73,20 +82,38 @@ export class Pattern {
         const mappedFromCount = mappedFromCountByHex.get(hex) ?? 0
         const mappedFromHexes = mappedFromHexesByHex.get(hex) ?? []
 
+        const isFabric = fabricIndices.has(this.rawPalette.indexOf(hex))
+
         return {
-          dmcCode: dmc?.code ?? this.stitches.find((s) => normalizeHex(s.hex) === hex)?.dmcCode ?? hex,
-          name: dmc?.name ?? 'Quantized Color',
+          dmcCode: isFabric ? 'Fabric' : (dmc?.code ?? this.stitches.find((s) => normalizeHex(s.hex) === hex)?.dmcCode ?? hex),
+          name: isFabric ? 'Fabric (no stitch)' : (dmc?.name ?? 'Quantized Color'),
           hex,
           rawHex: isMappedToDmc ? hex : hex,
           mappedHex: isMappedToDmc ? hex : null,
-          isMappedToDmc,
+          isMappedToDmc: isFabric ? false : isMappedToDmc,
           coverage: stitchCount / totalStitches,
           stitchCount,
-          markerReused: false, // TODO: detect marker reuse
+          markerReused: false,
           mappedFromCount: isMappedToDmc ? mappedFromCount : undefined,
           mappedFromHexes: isMappedToDmc ? mappedFromHexes : undefined,
         }
       })
+  }
+
+  private getFabricIndices(config?: { fabricColor: RGBColor, stitchThreshold: number }): Set<number> {
+    const fabricIndices = new Set<number>()
+    if (!config || !this.paletteHex) return fabricIndices
+
+    const fabricOkLab = linearRgbToOkLab(srgbToLinear(config.fabricColor.r), srgbToLinear(config.fabricColor.g), srgbToLinear(config.fabricColor.b))
+    const thresholdSq = config.stitchThreshold * config.stitchThreshold
+
+    this.rawPalette.forEach((hex, idx) => {
+      const rgb = hexToRgb(hex)
+      const lab = linearRgbToOkLab(srgbToLinear(rgb.r), srgbToLinear(rgb.g), srgbToLinear(rgb.b))
+      const distSq = okLabDistanceSqWeighted(lab[0], lab[1], lab[2], fabricOkLab[0], fabricOkLab[1], fabricOkLab[2], 1.35)
+      if (distSq < thresholdSq) fabricIndices.add(idx)
+    })
+    return fabricIndices
   }
 
   getStitchCount(dmcCode: string): number {
@@ -113,6 +140,8 @@ export class Pattern {
       activePaletteMode: 'dmc',
       mappingTable: mapping.mappingTable,
       dmcMetadataByMappedHex: mapping.dmcMetadataByMappedHex,
+      labels: this.labels,
+      paletteHex: mapping.mappedPalette || this.paletteHex,
     })
   }
 
@@ -148,14 +177,17 @@ export class Pattern {
     const config: ProcessingConfig =
       typeof arg === 'number'
         ? {
-            colorCount: arg,
-            ditherMode: 'none',
-            targetSize: Math.min(image.width, image.height),
-            useDmcPalette: false,
-            smoothingAmount: 0,
-            simplifyAmount: 0,
-            minRegionSize: 1,
-          }
+          colorCount: arg,
+          ditherMode: 'none',
+          targetSize: Math.min(image.width, image.height),
+          useDmcPalette: false,
+          smoothingAmount: 0,
+          simplifyAmount: 0,
+          minRegionSize: 1,
+          fabricColor: { r: 245, g: 245, b: 220 },
+          stitchThreshold: 0.1,
+          organicPreview: false,
+        }
         : arg
 
     const { labels, paletteHex } = quantizeImageToPalette(image, {
@@ -193,6 +225,8 @@ export class Pattern {
       rawPalette,
       mappedPalette: null,
       activePaletteMode: 'raw',
+      labels,
+      paletteHex: rawPalette,
     })
   }
 }
@@ -203,4 +237,16 @@ function uniqueHexesFromStitches(stitches: Stitch[]): string[] {
 
 function normalizeHex(hex: string): string {
   return hex.startsWith('#') ? hex.toUpperCase() : `#${hex.toUpperCase()}`
+}
+
+function hexToRgb(hex: string) {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return { r, g, b }
+}
+
+function srgbToLinear(v: number): number {
+  const s = v / 255
+  return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
 }

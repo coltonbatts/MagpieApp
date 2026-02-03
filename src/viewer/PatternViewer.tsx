@@ -4,13 +4,24 @@ import type { Viewport } from 'pixi-viewport'
 import { Pattern } from '@/model/Pattern'
 import { VIEWER } from '@/lib/constants'
 import { createViewport, fitViewportToWorld } from './viewport-config'
+import { usePatternStore } from '@/store/pattern-store'
+import { linearRgbToOkLab, okLabDistanceSqWeighted } from '@/processing/color-spaces'
+import { getProcessedPaths, type Point, type Path } from '@/processing/vectorize'
 
 interface PatternViewerProps {
   pattern: Pattern | null
-  showGrid?: boolean
 }
 
-export function PatternViewer({ pattern, showGrid = true }: PatternViewerProps) {
+export function PatternViewer({ pattern }: PatternViewerProps) {
+  const [activeTab, setActiveTab] = useState<'finished' | 'pattern'>('finished')
+
+  // Local toggles for Finished Preview
+  const [showStitchedOnly, setShowStitchedOnly] = useState(false)
+
+  // Local toggles for Pattern Preview
+  const [showGrid, setShowGrid] = useState(true)
+  const [showLabels, setShowLabels] = useState(true)
+  const [showOutlines, setShowOutlines] = useState(true)
   // 60-second QA checklist:
   // 1) Load a pattern and verify first paint is centered/fitted (not top-left).
   // 2) Drag + wheel zoom, then resize window: screen should resize but camera pose must persist.
@@ -21,6 +32,7 @@ export function PatternViewer({ pattern, showGrid = true }: PatternViewerProps) 
   const appRef = useRef<PIXINamespace.Application | null>(null)
   const viewportRef = useRef<Viewport | null>(null)
   const pixiRef = useRef<typeof PIXINamespace | null>(null)
+  const { processingConfig } = usePatternStore()
   const worldSizeRef = useRef({ width: 1, height: 1 })
   const hasUserTransformedViewportRef = useRef(false)
   const [viewerError, setViewerError] = useState<string | null>(null)
@@ -82,7 +94,7 @@ export function PatternViewer({ pattern, showGrid = true }: PatternViewerProps) 
           width: container.clientWidth || window.innerWidth,
           height: container.clientHeight || window.innerHeight,
           backgroundColor: 0xf5f5f5,
-          antialias: false,
+          antialias: true,
           autoDensity: true,
           // DPR controls canvas density only; stitch colors are direct solid fills.
           resolution: window.devicePixelRatio || 1,
@@ -194,10 +206,17 @@ export function PatternViewer({ pattern, showGrid = true }: PatternViewerProps) 
     worldSizeRef.current = { width: worldWidth, height: worldHeight }
 
     viewportRef.current.removeChildren()
-    renderPattern(pixiRef.current, viewportRef.current, pattern, showGrid)
+    renderPattern(pixiRef.current, viewportRef.current, pattern, {
+      activeTab,
+      showStitchedOnly,
+      showGrid,
+      showLabels,
+      showOutlines,
+      config: processingConfig
+    })
     fitViewportToWorld(viewportRef.current, worldWidth, worldHeight)
     hasUserTransformedViewportRef.current = false
-  }, [isReady, pattern, showGrid])
+  }, [isReady, pattern, activeTab, showStitchedOnly, showGrid, showLabels, showOutlines, processingConfig])
 
   if (viewerError) {
     return (
@@ -214,6 +233,83 @@ export function PatternViewer({ pattern, showGrid = true }: PatternViewerProps) 
         className="h-full w-full"
         style={{ touchAction: 'none' }}
       />
+      <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 flex items-center gap-1 rounded-lg bg-white/95 p-1 shadow-lg ring-1 ring-black/10">
+        <button
+          onClick={() => setActiveTab('finished')}
+          className={`px-4 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTab === 'finished'
+            ? 'bg-blue-500 text-white shadow-sm'
+            : 'text-gray-600 hover:bg-gray-100'
+            }`}
+        >
+          Finished
+        </button>
+        <button
+          onClick={() => setActiveTab('pattern')}
+          className={`px-4 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTab === 'pattern'
+            ? 'bg-blue-500 text-white shadow-sm'
+            : 'text-gray-600 hover:bg-gray-100'
+            }`}
+        >
+          Pattern
+        </button>
+      </div>
+
+      <div className="absolute left-4 top-4 z-10 flex flex-col gap-2">
+        {activeTab === 'finished' ? (
+          <div className="flex items-center gap-2 rounded-lg bg-white/95 px-3 py-2 shadow-sm ring-1 ring-black/5">
+            <input
+              type="checkbox"
+              id="showStitchedOnly"
+              checked={showStitchedOnly}
+              onChange={(e) => setShowStitchedOnly(e.target.checked)}
+              className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600"
+            />
+            <label htmlFor="showStitchedOnly" className="text-xs font-medium text-gray-700 select-none">
+              Stitched Only
+            </label>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1.5 rounded-lg bg-white/95 p-2 shadow-sm ring-1 ring-black/5">
+            <div className="flex items-center gap-2 px-1">
+              <input
+                type="checkbox"
+                id="showGrid"
+                checked={showGrid}
+                onChange={(e) => setShowGrid(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600"
+              />
+              <label htmlFor="showGrid" className="text-xs font-medium text-gray-700 select-none">
+                Grid
+              </label>
+            </div>
+            <div className="flex items-center gap-2 px-1">
+              <input
+                type="checkbox"
+                id="showLabels"
+                checked={showLabels}
+                onChange={(e) => setShowLabels(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600"
+              />
+              <label htmlFor="showLabels" className="text-xs font-medium text-gray-700 select-none">
+                Labels
+              </label>
+            </div>
+            <div className="flex items-center gap-2 px-1">
+              <input
+                type="checkbox"
+                id="showOutlines"
+                checked={showOutlines}
+                onChange={(e) => setShowOutlines(e.target.checked)}
+                className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600"
+              />
+              <label htmlFor="showOutlines" className="text-xs font-medium text-gray-700 select-none">
+                Outlines
+              </label>
+            </div>
+          </div>
+        )}
+      </div>
+
       <div className="absolute right-4 top-4 z-10">
         <button
           type="button"
@@ -238,41 +334,194 @@ export function PatternViewer({ pattern, showGrid = true }: PatternViewerProps) 
   )
 }
 
+interface RenderOptions {
+  activeTab: 'finished' | 'pattern'
+  showStitchedOnly: boolean
+  showGrid: boolean
+  showLabels: boolean
+  showOutlines: boolean
+  config: any
+}
+
 function renderPattern(
   PIXI: typeof PIXINamespace,
   viewport: Viewport,
   pattern: Pattern,
-  showGrid: boolean
+  options: RenderOptions
 ) {
+  const { activeTab, showStitchedOnly, config } = options
+  const cellSize = VIEWER.CELL_SIZE
+  const fabricIndices = getFabricIndices(pattern, config)
+  const fabricColor = (config.fabricColor.r << 16) | (config.fabricColor.g << 8) | config.fabricColor.b
+
+  // 1. Draw Background (only if not stitched-only in finished mode)
+  if (!(activeTab === 'finished' && showStitchedOnly)) {
+    const bg = new PIXI.Graphics()
+    bg.rect(0, 0, pattern.width * cellSize, pattern.height * cellSize)
+    bg.fill(fabricColor)
+    viewport.addChild(bg)
+  }
+
+  // 2. Main Rendering Path
+  if (activeTab === 'finished') {
+    renderFinishedPreview(PIXI, viewport, pattern, options, fabricIndices)
+  } else {
+    renderPatternPreview(PIXI, viewport, pattern, options, fabricIndices)
+  }
+}
+
+function renderFinishedPreview(
+  PIXI: typeof PIXINamespace,
+  viewport: Viewport,
+  pattern: Pattern,
+  options: RenderOptions,
+  fabricIndices: Set<number>
+) {
+  const { config } = options
   const cellSize = VIEWER.CELL_SIZE
 
+  if (config.organicPreview && pattern.labels && pattern.paletteHex) {
+    // Vector Organic Look
+    const paths = getProcessedPaths(pattern.labels, pattern.width, pattern.height, fabricIndices, {
+      simplify: 0.4,
+      smooth: 3
+    })
+    paths.forEach(path => {
+      if (path.isFabric) return
+      const color = parseInt(pattern.paletteHex![path.label].slice(1), 16)
+
+      const poly = new PIXI.Graphics()
+      poly.poly(path.points.map((p: Point) => ({ x: p.x * cellSize, y: p.y * cellSize })))
+      poly.fill(color)
+      viewport.addChild(poly)
+    })
+  } else {
+    // Stitch-like Pixel Look
+    const stitchLayer = new PIXI.Graphics()
+    const gap = 1.5
+    const radius = 2
+
+    pattern.stitches.forEach((stitch) => {
+      const colorIdx = pattern.rawPalette.indexOf(stitch.hex.toUpperCase())
+      if (fabricIndices.has(colorIdx)) return
+
+      const color = parseInt(stitch.hex.slice(1), 16)
+      // Draw a rounded rectangle for a "stitch" look
+      stitchLayer.roundRect(
+        stitch.x * cellSize + gap / 2,
+        stitch.y * cellSize + gap / 2,
+        cellSize - gap,
+        cellSize - gap,
+        radius
+      )
+      stitchLayer.fill(color)
+    })
+    viewport.addChild(stitchLayer)
+  }
+}
+
+function renderPatternPreview(
+  PIXI: typeof PIXINamespace,
+  viewport: Viewport,
+  pattern: Pattern,
+  options: RenderOptions,
+  fabricIndices: Set<number>
+) {
+  const { showGrid, showLabels, showOutlines } = options
+  const cellSize = VIEWER.CELL_SIZE
+
+  // 1. Grid (Drawn first so it's behind if needed)
   if (showGrid) {
     const grid = new PIXI.Graphics()
-    grid.setStrokeStyle({ width: 1, color: 0xcccccc, alpha: 0.3 })
+    grid.setStrokeStyle({ width: 1, color: 0x000000, alpha: 0.1 })
 
     for (let x = 0; x <= pattern.width; x++) {
       grid.moveTo(x * cellSize, 0)
       grid.lineTo(x * cellSize, pattern.height * cellSize)
-      grid.stroke()
     }
-
     for (let y = 0; y <= pattern.height; y++) {
       grid.moveTo(0, y * cellSize)
       grid.lineTo(pattern.width * cellSize, y * cellSize)
-      grid.stroke()
     }
-
+    grid.stroke()
     viewport.addChild(grid)
   }
 
-  const stitchLayer = new PIXI.Graphics()
-  // Colors are rendered directly from precomputed hex values with no Pixi filters
-  // or texture sampling in this path (Graphics primitives only).
-  pattern.stitches.forEach((stitch) => {
-    const color = parseInt(stitch.hex.slice(1), 16)
-    stitchLayer.rect(stitch.x * cellSize, stitch.y * cellSize, cellSize, cellSize)
-    stitchLayer.fill(color)
-  })
+  // 2. Vector Paths and Labels
+  if (pattern.labels && pattern.paletteHex) {
+    const paths = getProcessedPaths(pattern.labels, pattern.width, pattern.height, fabricIndices, {
+      simplify: 0.4,
+      smooth: 3
+    })
 
-  viewport.addChild(stitchLayer)
+    paths.forEach((path: Path) => {
+      if (path.isFabric) return
+
+      // Outline
+      if (showOutlines) {
+        const outline = new PIXI.Graphics()
+        outline.poly(path.points.map((p: Point) => ({ x: p.x * cellSize, y: p.y * cellSize })))
+        outline.setStrokeStyle({ width: 1.5, color: 0x000000, alpha: 0.8 })
+        outline.stroke()
+        viewport.addChild(outline)
+      }
+
+      // Label
+      if (showLabels && path.points.length > 5) {
+        const center = getBoundingBoxCenter(path.points)
+        const label = new PIXI.Text({
+          text: (path.label + 1).toString(),
+          style: {
+            fontFamily: 'Arial',
+            fontSize: Math.max(8, cellSize * 0.4),
+            fill: 0x000000,
+            align: 'center',
+            fontWeight: 'bold'
+          }
+        })
+        label.anchor.set(0.5)
+        label.position.set(center.x * cellSize, center.y * cellSize)
+        viewport.addChild(label)
+      }
+    })
+  }
+}
+
+function getBoundingBoxCenter(points: Array<{ x: number, y: number }>): { x: number, y: number } {
+  let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity
+  for (const p of points) {
+    if (p.x < minX) minX = p.x
+    if (p.y < minY) minY = p.y
+    if (p.x > maxX) maxX = p.x
+    if (p.y > maxY) maxY = p.y
+  }
+  return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 }
+}
+
+function getFabricIndices(pattern: Pattern, config: any): Set<number> {
+  const fabricIndices = new Set<number>()
+  if (!pattern.paletteHex) return fabricIndices
+
+  const fabricOkLab = linearRgbToOkLab(srgbToLinear(config.fabricColor.r), srgbToLinear(config.fabricColor.g), srgbToLinear(config.fabricColor.b))
+  const thresholdSq = config.stitchThreshold * config.stitchThreshold
+
+  pattern.rawPalette.forEach((hex, idx) => {
+    const rgb = hexToRgb(hex)
+    const lab = linearRgbToOkLab(srgbToLinear(rgb.r), srgbToLinear(rgb.g), srgbToLinear(rgb.b))
+    const distSq = okLabDistanceSqWeighted(lab[0], lab[1], lab[2], fabricOkLab[0], fabricOkLab[1], fabricOkLab[2], 1.35)
+    if (distSq < thresholdSq) fabricIndices.add(idx)
+  })
+  return fabricIndices
+}
+
+function hexToRgb(hex: string) {
+  const r = parseInt(hex.slice(1, 3), 16)
+  const g = parseInt(hex.slice(3, 5), 16)
+  const b = parseInt(hex.slice(5, 7), 16)
+  return { r, g, b }
+}
+
+function srgbToLinear(v: number): number {
+  const s = v / 255
+  return s <= 0.04045 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4)
 }

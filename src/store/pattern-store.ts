@@ -30,6 +30,9 @@ export const usePatternStore = create<PatternState>((set) => ({
     smoothingAmount: 0.25,
     simplifyAmount: 0.15,
     minRegionSize: 3,
+    fabricColor: { r: 245, g: 245, b: 220 }, // Light Linen
+    stitchThreshold: 0.1,
+    organicPreview: false,
   },
   isProcessing: false,
   error: null,

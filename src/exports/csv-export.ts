@@ -1,13 +1,14 @@
 import { Pattern } from '@/model/Pattern'
 import { downloadBlob } from '@/exports/download'
+import type { RGBColor } from '@/types'
 
 interface CsvExportResult {
   fileName: string
   rowCount: number
 }
 
-export function exportLegendCsv(pattern: Pattern): CsvExportResult {
-  const legend = pattern.getLegend()
+export function exportLegendCsv(pattern: Pattern, options?: { fabricColor: RGBColor, stitchThreshold: number }): CsvExportResult {
+  const legend = pattern.getLegend({ fabricConfig: options })
   const mode = pattern.activePaletteMode
 
   const header = [
