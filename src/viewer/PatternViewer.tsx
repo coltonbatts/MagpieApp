@@ -5,6 +5,7 @@ import { Pattern } from '@/model/Pattern'
 import { VIEWER } from '@/lib/constants'
 import { createViewport, fitViewportToWorld } from './viewport-config'
 import { usePatternStore } from '@/store/pattern-store'
+import { useUIStore } from '@/store/ui-store'
 import { linearRgbToOkLab, okLabDistanceSqWeighted } from '@/processing/color-spaces'
 import { getProcessedPaths, type Point, type Path } from '@/processing/vectorize'
 
@@ -13,6 +14,7 @@ interface PatternViewerProps {
 }
 
 export function PatternViewer({ pattern }: PatternViewerProps) {
+  const { workflowStage } = useUIStore()
   const [activeTab, setActiveTab] = useState<'finished' | 'pattern'>('finished')
 
   // Local toggles for Finished Preview
@@ -22,6 +24,17 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
   const [showGrid, setShowGrid] = useState(true)
   const [showLabels, setShowLabels] = useState(true)
   const [showOutlines, setShowOutlines] = useState(true)
+
+  // Sync stage to tab
+  useEffect(() => {
+    if (workflowStage === 'Export') {
+      setActiveTab('pattern')
+      setShowGrid(false)
+    } else {
+      setActiveTab('finished')
+      setShowGrid(true)
+    }
+  }, [workflowStage])
   // 60-second QA checklist:
   // 1) Load a pattern and verify first paint is centered/fitted (not top-left).
   // 2) Drag + wheel zoom, then resize window: screen should resize but camera pose must persist.

@@ -85,3 +85,9 @@ export interface ExportOptions {
   includeLegend?: boolean
   stitchSizePx?: number
 }
+export type WorkflowStage = 'Reference' | 'Select' | 'Build' | 'Export'
+
+export interface MaskConfig {
+  brushSize: number
+  opacity: number
+}

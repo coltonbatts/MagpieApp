@@ -5,6 +5,7 @@ import { useEffect, useState } from 'react'
 export function FabricPanel() {
     const { processingConfig, setProcessingConfig } = usePatternStore()
     const [hsv, setHsv] = useState<[number, number, number]>([0, 0, 96])
+    const [showAdvanced, setShowAdvanced] = useState(false)
 
     useEffect(() => {
         const { r, g, b } = processingConfig.fabricColor
@@ -76,22 +77,33 @@ export function FabricPanel() {
                 </div>
 
                 <div className="pt-2">
-                    <label className="flex justify-between text-xs font-medium text-gray-600 mb-1">
-                        <span>Stitch Coverage Threshold</span>
-                        <span>{Math.round(processingConfig.stitchThreshold * 100)}%</span>
-                    </label>
-                    <input
-                        type="range"
-                        min={0}
-                        max={1}
-                        step={0.01}
-                        value={processingConfig.stitchThreshold}
-                        onChange={(e) => setProcessingConfig({ stitchThreshold: parseFloat(e.target.value) })}
-                        className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                    />
-                    <p className="text-[10px] text-gray-400 mt-1 italic">
-                        Lower = more fabric remains unstitched.
-                    </p>
+                    <button
+                        onClick={() => setShowAdvanced(!showAdvanced)}
+                        className="text-[10px] text-blue-600 hover:text-blue-800 font-medium mb-2"
+                    >
+                        {showAdvanced ? 'Hide Advanced Fabric Settings' : 'Show Advanced Fabric Settings'}
+                    </button>
+
+                    {showAdvanced && (
+                        <div className="space-y-2 animate-in fade-in duration-200">
+                            <label className="flex justify-between text-[10px] font-medium text-gray-400 mb-1">
+                                <span>Stitch Coverage Threshold (Auto-mask)</span>
+                                <span>{Math.round(processingConfig.stitchThreshold * 100)}%</span>
+                            </label>
+                            <input
+                                type="range"
+                                min={0}
+                                max={1}
+                                step={0.01}
+                                value={processingConfig.stitchThreshold}
+                                onChange={(e) => setProcessingConfig({ stitchThreshold: parseFloat(e.target.value) })}
+                                className="w-full h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-gray-400"
+                            />
+                            <p className="text-[9px] text-gray-400 italic">
+                                Post-process within the mask. Lower = more fabric.
+                            </p>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

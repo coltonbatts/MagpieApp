@@ -21,7 +21,8 @@ export function quantizeImageToPalette(
   config: Pick<
     ProcessingConfig,
     'colorCount' | 'smoothingAmount' | 'simplifyAmount' | 'minRegionSize' | 'ditherMode'
-  >
+  >,
+  mask?: Uint8Array | null
 ): QuantizedImageResult {
   const width = image.width
   const height = image.height
@@ -37,7 +38,7 @@ export function quantizeImageToPalette(
     clamp01(config.smoothingAmount)
   )
 
-  const initial = kmeansQuantizeOkLab(smoothed.okLab, width, height, targetK)
+  const initial = kmeansQuantizeOkLab(smoothed.okLab, width, height, targetK, mask)
   let labels = initial.labels
   let centersOkLab = initial.centersOkLab
 
@@ -229,16 +230,41 @@ function kmeansQuantizeOkLab(
   okLab: Float32Array,
   width: number,
   height: number,
-  k: number
+  k: number,
+  mask?: Uint8Array | null
 ): { labels: Uint16Array<ArrayBufferLike>; centersOkLab: Float32Array } {
   const n = width * height
   const wL = 1.35
 
   // Train on a deterministic subset for speed and stability.
   const maxTrain = 9000
-  const stride = Math.max(1, Math.floor(n / Math.min(n, maxTrain)))
   const trainIndices: number[] = []
-  for (let i = 0; i < n; i += stride) trainIndices.push(i)
+
+  if (mask) {
+    // If mask is provided, prioritize masked pixels for training
+    for (let i = 0; i < n; i += 1) {
+      if (mask[i] > 0) trainIndices.push(i)
+    }
+    // If we have too many masked pixels, sub-sample
+    if (trainIndices.length > maxTrain) {
+      const stride = Math.floor(trainIndices.length / maxTrain)
+      const sampled: number[] = []
+      for (let i = 0; i < trainIndices.length; i += stride) sampled.push(trainIndices[i])
+      trainIndices.length = 0
+      trainIndices.push(...sampled)
+    }
+    // If we have too few masked pixels (less than k), add regular pixels to fill
+    if (trainIndices.length < k) {
+      const stride = Math.max(1, Math.floor(n / (maxTrain - trainIndices.length)))
+      for (let i = 0; i < n; i += stride) {
+        if (mask[i] === 0) trainIndices.push(i)
+        if (trainIndices.length >= maxTrain) break
+      }
+    }
+  } else {
+    const stride = Math.max(1, Math.floor(n / Math.min(n, maxTrain)))
+    for (let i = 0; i < n; i += stride) trainIndices.push(i)
+  }
 
   const centers = initCentersFarthestOkLab(okLab, trainIndices, k, wL)
   const assignments = new Uint16Array(trainIndices.length)

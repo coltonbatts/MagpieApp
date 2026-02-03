@@ -43,7 +43,7 @@ export class Pattern {
     this.paletteHex = options?.paletteHex ?? null
   }
 
-  getLegend(options?: { fabricConfig?: { fabricColor: RGBColor, stitchThreshold: number } }): LegendEntry[] {
+  getLegend(options?: { fabricConfig?: { fabricColor: RGBColor, stitchThreshold: number }, mask?: Uint8Array | null }): LegendEntry[] {
     const counts = new Map<string, number>()
     const isMappedToDmc = this.activePaletteMode === 'dmc'
     const totalStitches = this.stitches.length || 1
@@ -57,9 +57,14 @@ export class Pattern {
 
     const fabricIndices = this.getFabricIndices(options?.fabricConfig)
 
-    this.stitches.forEach((stitch) => {
+    this.stitches.forEach((stitch, i) => {
+      // If mask exists and this pixel is not masked, it's fabric
+      const isExplicitFabric = options?.mask && options.mask[i] === 0
       const stitchHex = normalizeHex(stitch.hex)
-      counts.set(stitchHex, (counts.get(stitchHex) || 0) + 1)
+
+      if (!isExplicitFabric) {
+        counts.set(stitchHex, (counts.get(stitchHex) || 0) + 1)
+      }
     })
 
     const mappedFromCountByHex = new Map<string, number>()
@@ -75,7 +80,7 @@ export class Pattern {
       ? paletteOrder.map((hex) => normalizeHex(hex)).filter((hex) => counts.has(hex))
       : Array.from(counts.keys())
 
-    return orderedHexes
+    const legend: LegendEntry[] = orderedHexes
       .map((hex) => {
         const stitchCount = counts.get(hex) ?? 0
         const dmc = this.dmcMetadataByMappedHex[hex]
@@ -98,6 +103,25 @@ export class Pattern {
           mappedFromHexes: isMappedToDmc ? mappedFromHexes : undefined,
         }
       })
+
+    // Add a virtual entry for Fabric if there are masked-out pixels
+    const totalCountedStitches = Array.from(counts.values()).reduce((a, b) => a + b, 0)
+    if (totalCountedStitches < totalStitches) {
+      const fabricCount = totalStitches - totalCountedStitches
+      legend.push({
+        dmcCode: 'Fabric',
+        name: 'Fabric (no stitch)',
+        hex: '#FFFFFF', // Dummy hex, will be replaced by fabric color in viewer
+        rawHex: '#FFFFFF',
+        mappedHex: null,
+        isMappedToDmc: false,
+        coverage: fabricCount / totalStitches,
+        stitchCount: fabricCount,
+        markerReused: false
+      })
+    }
+
+    return legend
   }
 
   private getFabricIndices(config?: { fabricColor: RGBColor, stitchThreshold: number }): Set<number> {
@@ -169,34 +193,14 @@ export class Pattern {
     })
   }
 
-  // `image` is expected to be normalized upstream to the target stitch grid size.
-  // If source alpha exists, we composite against white so transparent pixels are deterministic.
-  static fromImageData(image: ImageData, colorCount: number): Pattern
-  static fromImageData(image: ImageData, config: ProcessingConfig): Pattern
-  static fromImageData(image: ImageData, arg: number | ProcessingConfig): Pattern {
-    const config: ProcessingConfig =
-      typeof arg === 'number'
-        ? {
-          colorCount: arg,
-          ditherMode: 'none',
-          targetSize: Math.min(image.width, image.height),
-          useDmcPalette: false,
-          smoothingAmount: 0,
-          simplifyAmount: 0,
-          minRegionSize: 1,
-          fabricColor: { r: 245, g: 245, b: 220 },
-          stitchThreshold: 0.1,
-          organicPreview: false,
-        }
-        : arg
-
+  static fromImageData(image: ImageData, config: ProcessingConfig, mask?: Uint8Array | null): Pattern {
     const { labels, paletteHex } = quantizeImageToPalette(image, {
       colorCount: config.colorCount,
       ditherMode: config.ditherMode,
       smoothingAmount: config.smoothingAmount,
       simplifyAmount: config.simplifyAmount,
       minRegionSize: config.minRegionSize,
-    })
+    }, mask)
 
     const stitches: Stitch[] = []
     const markers = ['S', 'O', 'T', '*', 'D', 'X', '+', '#', '%', '@']
@@ -210,13 +214,17 @@ export class Pattern {
       for (let x = 0; x < image.width; x += 1) {
         const i = yOff + x
         const paletteIndex = labels[i]
-        const hex = rawPalette[paletteIndex] ?? '#000000'
+
+        // Use mask to force non-stitched pixels to fabric
+        const isFabric = mask && mask[i] === 0
+        const hex = isFabric ? '#FFFFFF00' : (rawPalette[paletteIndex] ?? '#000000')
+
         stitches.push({
           x,
           y,
-          dmcCode: `RAW-${paletteIndex + 1}`,
-          marker: markerByPaletteIndex[paletteIndex] ?? markers[0],
-          hex,
+          dmcCode: isFabric ? 'Fabric' : `RAW-${paletteIndex + 1}`,
+          marker: isFabric ? '' : (markerByPaletteIndex[paletteIndex] ?? markers[0]),
+          hex: isFabric ? '#FFFFFF' : hex,
         })
       }
     }
