@@ -30,7 +30,8 @@ export function generatePatternSVG(pattern: Pattern, config: ProcessingConfig): 
     // 2. Vectorize + Simplify and Smooth
     const paths = getProcessedPaths(labels, width, height, fabricLabels, {
         simplify: 0.4,
-        smooth: 3
+        smooth: 3,
+        manualMask: pattern.selection?.mask
     })
 
     // 4. Build SVG

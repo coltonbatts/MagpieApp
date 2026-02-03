@@ -17,9 +17,9 @@ export function getProcessedPaths(
     width: number,
     height: number,
     fabricLabels: Set<number>,
-    options: { simplify?: number; smooth?: number } = {}
+    options: { simplify?: number; smooth?: number; manualMask?: Uint8Array | null } = {}
 ): Path[] {
-    const rawPaths = vectorizeLabelMap(labels, width, height, fabricLabels);
+    const rawPaths = vectorizeLabelMap(labels, width, height, fabricLabels, options.manualMask);
     return rawPaths.map(p => ({
         ...p,
         points: smoothPath(simplifyPath(p.points, options.simplify ?? 0.5), options.smooth ?? 2)
@@ -33,7 +33,8 @@ export function vectorizeLabelMap(
     labels: Uint16Array,
     width: number,
     height: number,
-    fabricLabels: Set<number>
+    fabricLabels: Set<number>,
+    manualMask?: Uint8Array | null
 ): Path[] {
     const paths: Path[] = [];
     const numLabels = Math.max(...Array.from(labels)) + 1;
@@ -42,7 +43,8 @@ export function vectorizeLabelMap(
         const isFabric = fabricLabels.has(l);
         const mask = new Uint8Array(width * height);
         for (let i = 0; i < width * height; i++) {
-            if (labels[i] === l) mask[i] = 1;
+            const isManualFabric = manualMask && manualMask[i] === 0;
+            if (labels[i] === l && !isManualFabric) mask[i] = 1;
         }
 
         const contours = findContours(mask, width, height);

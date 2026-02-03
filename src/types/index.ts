@@ -91,3 +91,16 @@ export interface MaskConfig {
   brushSize: number
   opacity: number
 }
+
+/**
+ * SelectionArtifact is the definitive representation of WHAT is being stitched.
+ * It is produced in SelectStage and consumed by Build/Export.
+ */
+export interface SelectionArtifact {
+  id: string // Unique ID for this selection version
+  referenceId: string // Must match the source image ID
+  mask: Uint8Array
+  width: number
+  height: number
+  isDefault: boolean // True if it's the initial "select all" mask
+}

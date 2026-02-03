@@ -1,11 +1,13 @@
 import { create } from 'zustand'
 import { Pattern } from '@/model/Pattern'
-import type { ProcessingConfig, MaskConfig } from '@/types'
+import type { ProcessingConfig, MaskConfig, SelectionArtifact } from '@/types'
+import { SelectionArtifactModel } from '@/model/SelectionArtifact'
 
 interface PatternState {
+  referenceId: string | null
   originalImage: ImageBitmap | null
   normalizedImage: ImageData | null
-  stitchMask: Uint8Array | null
+  selection: SelectionArtifact | null
   maskConfig: MaskConfig
   pattern: Pattern | null
   processingConfig: ProcessingConfig
@@ -13,7 +15,7 @@ interface PatternState {
   error: string | null
   setOriginalImage: (image: ImageBitmap) => void
   setNormalizedImage: (image: ImageData) => void
-  setStitchMask: (mask: Uint8Array | null) => void
+  setSelection: (selection: SelectionArtifact | null) => void
   setMaskConfig: (config: Partial<MaskConfig>) => void
   setPattern: (pattern: Pattern | null) => void
   setProcessingConfig: (config: Partial<ProcessingConfig>) => void
@@ -23,9 +25,10 @@ interface PatternState {
 }
 
 export const usePatternStore = create<PatternState>((set) => ({
+  referenceId: null,
   originalImage: null,
   normalizedImage: null,
-  stitchMask: null,
+  selection: null,
   maskConfig: {
     brushSize: 20,
     opacity: 0.5,
@@ -50,8 +53,29 @@ export const usePatternStore = create<PatternState>((set) => ({
       state.originalImage?.close()
       return { originalImage: image }
     }),
-  setNormalizedImage: (image) => set({ normalizedImage: image, stitchMask: null }),
-  setStitchMask: (mask) => set({ stitchMask: mask }),
+  setNormalizedImage: (image) => {
+    const newReferenceId = `ref_${Math.random().toString(36).substring(2, 9)}`
+    set({
+      normalizedImage: image,
+      referenceId: newReferenceId,
+      selection: null
+    })
+  },
+  setSelection: (selection) => set((state) => {
+    if (selection && state.normalizedImage && state.referenceId) {
+      if (process.env.NODE_ENV === 'development') {
+        SelectionArtifactModel.assertValid(
+          selection,
+          state.normalizedImage.width,
+          state.normalizedImage.height,
+          state.referenceId
+        )
+      }
+    }
+    return {
+      selection
+    }
+  }),
   setMaskConfig: (config) =>
     set((state) => ({
       maskConfig: { ...state.maskConfig, ...config },
@@ -69,7 +93,8 @@ export const usePatternStore = create<PatternState>((set) => ({
       return {
         originalImage: null,
         normalizedImage: null,
-        stitchMask: null,
+        referenceId: null,
+        selection: null,
         pattern: null,
         isProcessing: false,
         error: null,

@@ -1,91 +1,136 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
 import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
+import { SelectionArtifactModel } from '@/model/SelectionArtifact'
 
 export function SelectStage() {
-    const { normalizedImage, stitchMask, setStitchMask, maskConfig, setMaskConfig } = usePatternStore()
+    const { normalizedImage, referenceId, selection, setSelection, maskConfig, setMaskConfig } = usePatternStore()
     const { setWorkflowStage } = useUIStore()
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const [isDrawing, setIsDrawing] = useState(false)
     const [tool, setTool] = useState<'brush' | 'eraser'>('brush')
 
-    // Initialize mask if it doesn't exist
+    // Performance refs: avoid React state chugging during mouse move
+    const maskRef = useRef<Uint8Array | null>(null)
+    const isDirtyRef = useRef(false)
+    const offscreenOverlayRef = useRef<HTMLCanvasElement | null>(null)
+
+    // Sync store selection to local ref if IDs mismatch (e.g. initial load or undo/redo)
     useEffect(() => {
-        if (normalizedImage && !stitchMask) {
-            const mask = new Uint8Array(normalizedImage.width * normalizedImage.height).fill(1)
-            setStitchMask(mask)
+        if (selection && (!maskRef.current || selection.mask !== maskRef.current)) {
+            // Only update from store if it's a "remote" change (not our own draw)
+            maskRef.current = new Uint8Array(selection.mask)
+            isDirtyRef.current = true
         }
-    }, [normalizedImage, stitchMask, setStitchMask])
+    }, [selection])
+
+    // Initialize selection if it doesn't exist
+    useEffect(() => {
+        if (normalizedImage && referenceId && !selection) {
+            setSelection(SelectionArtifactModel.createDefault(
+                normalizedImage.width,
+                normalizedImage.height,
+                referenceId
+            ))
+        }
+    }, [normalizedImage, referenceId, selection, setSelection])
+
+    // Pre-calculate the dimming overlay whenever dimensions or mask opacity change
+    useEffect(() => {
+        if (!normalizedImage) return
+        const { width, height } = normalizedImage
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        if (ctx) {
+            ctx.fillStyle = `rgba(0,0,0,${0.3 * (1 - maskConfig.opacity)})`
+            ctx.fillRect(0, 0, width, height)
+        }
+        offscreenOverlayRef.current = canvas
+        isDirtyRef.current = true
+    }, [normalizedImage, maskConfig.opacity])
 
     const drawMask = useCallback(() => {
         const canvas = canvasRef.current
-        if (!canvas || !normalizedImage || !stitchMask) return
+        const mask = maskRef.current
+        if (!canvas || !normalizedImage || !mask) return
 
         const ctx = canvas.getContext('2d')
         if (!ctx) return
 
         const { width, height } = normalizedImage
-        canvas.width = width
-        canvas.height = height
+        if (canvas.width !== width) {
+            canvas.width = width
+            canvas.height = height
+        }
 
-        // Draw original image
+        // 1. Draw original image
+        ctx.putImageData(normalizedImage, 0, 0)
+
+        // 2. Draw mask overlay (Blue tint for stitched area)
+        const maskImgData = ctx.createImageData(width, height)
+        const alpha = Math.round(maskConfig.opacity * 255)
+
+        for (let i = 0; i < mask.length; i++) {
+            const isMasked = mask[i] === 1
+            const idx = i * 4
+            if (isMasked) {
+                maskImgData.data[idx] = 0
+                maskImgData.data[idx + 1] = 120
+                maskImgData.data[idx + 2] = 255
+                maskImgData.data[idx + 3] = alpha
+            } else {
+                maskImgData.data[idx + 3] = 0
+            }
+        }
+
+        // Put mask overlay
         const tempCanvas = document.createElement('canvas')
         tempCanvas.width = width
         tempCanvas.height = height
-        const tempCtx = tempCanvas.getContext('2d')
-        if (tempCtx) {
-            tempCtx.putImageData(normalizedImage, 0, 0)
-            ctx.drawImage(tempCanvas, 0, 0)
-        }
+        tempCanvas.getContext('2d')?.putImageData(maskImgData, 0, 0)
+        ctx.drawImage(tempCanvas, 0, 0)
 
-        // Draw mask overlay
-        const maskData = ctx.createImageData(width, height)
-        for (let i = 0; i < stitchMask.length; i++) {
-            const isMasked = stitchMask[i] === 1
-            const idx = i * 4
-            // Highlight stitched area with a blue tint
-            if (isMasked) {
-                maskData.data[idx] = 0
-                maskData.data[idx + 1] = 120
-                maskData.data[idx + 2] = 255
-                maskData.data[idx + 3] = Math.round(maskConfig.opacity * 255)
-            } else {
-                // Unmasked area (fabric)
-                maskData.data[idx] = 255
-                maskData.data[idx + 1] = 255
-                maskData.data[idx + 2] = 255
-                maskData.data[idx + 3] = 0 // Transparent
+        // 3. Draw semi-transparent dimming over fabric area
+        if (offscreenOverlayRef.current) {
+            ctx.save()
+            // Draw the full dimming overlay
+            ctx.drawImage(offscreenOverlayRef.current, 0, 0)
+
+            // Now REMOVE the dimming where mask is 1 (destination-out)
+            ctx.globalCompositeOperation = 'destination-out'
+            const clearData = ctx.createImageData(width, height)
+            for (let i = 0; i < mask.length; i++) {
+                if (mask[i] === 1) clearData.data[i * 4 + 3] = 255
             }
+            const clearCanvas = document.createElement('canvas')
+            clearCanvas.width = width
+            clearCanvas.height = height
+            clearCanvas.getContext('2d')?.putImageData(clearData, 0, 0)
+            ctx.drawImage(clearCanvas, 0, 0)
+
+            ctx.restore()
         }
 
-        // Draw semi-transparent gray over NO-STITCH area to dim it
-        const overlayCanvas = document.createElement('canvas')
-        overlayCanvas.width = width
-        overlayCanvas.height = height
-        const oCtx = overlayCanvas.getContext('2d')
-        if (oCtx) {
-            oCtx.putImageData(maskData, 0, 0)
-            ctx.drawImage(overlayCanvas, 0, 0)
+        isDirtyRef.current = false
+    }, [normalizedImage, maskConfig.opacity])
 
-            // Darken non-mask areas
-            ctx.fillStyle = `rgba(0,0,0,${0.3 * (1 - maskConfig.opacity)})`
-            for (let y = 0; y < height; y++) {
-                for (let x = 0; x < width; x++) {
-                    if (stitchMask[y * width + x] === 0) {
-                        ctx.fillRect(x, y, 1, 1)
-                    }
-                }
-            }
-        }
-
-    }, [normalizedImage, stitchMask, maskConfig.opacity])
-
+    // rAF loop for smooth rendering
     useEffect(() => {
-        drawMask()
+        let frameId: number
+        const loop = () => {
+            if (isDirtyRef.current) {
+                drawMask()
+            }
+            frameId = requestAnimationFrame(loop)
+        }
+        frameId = requestAnimationFrame(loop)
+        return () => cancelAnimationFrame(frameId)
     }, [drawMask])
 
     const handlePointerUpdate = (e: React.PointerEvent<HTMLCanvasElement>) => {
-        if (!isDrawing || !normalizedImage || !stitchMask) return
+        if (!isDrawing || !normalizedImage || !selection || !maskRef.current) return
 
         const canvas = canvasRef.current
         if (!canvas) return
@@ -98,28 +143,42 @@ export function SelectStage() {
         const y = Math.floor((e.clientY - rect.top) * scaleY)
 
         const radius = Math.max(1, Math.floor(maskConfig.brushSize / (rect.width / canvas.width) / 2))
-        const newMask = new Uint8Array(stitchMask)
+        const mask = maskRef.current
         const val = tool === 'brush' ? 1 : 0
+        const width = canvas.width
+        const height = canvas.height
 
+        let changed = false
         for (let dy = -radius; dy <= radius; dy++) {
             for (let dx = -radius; dx <= radius; dx++) {
                 const distSq = dx * dx + dy * dy
                 if (distSq <= radius * radius) {
                     const nx = x + dx
                     const ny = y + dy
-                    if (nx >= 0 && nx < canvas.width && ny >= 0 && ny < canvas.height) {
-                        newMask[ny * canvas.width + nx] = val
+                    if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
+                        const idx = ny * width + nx
+                        if (mask[idx] !== val) {
+                            mask[idx] = val
+                            changed = true
+                        }
                     }
                 }
             }
         }
-        setStitchMask(newMask)
+
+        if (changed) {
+            isDirtyRef.current = true
+        }
+    }
+
+    const commitMask = () => {
+        if (maskRef.current && selection) {
+            setSelection(SelectionArtifactModel.updateMask(selection, new Uint8Array(maskRef.current)))
+        }
     }
 
     const handleAutoSubject = () => {
-        // Basic auto-subject: detect non-white/non-bg pixels
-        // For now, let's just do a simple center crop-like mask to show it works
-        if (!normalizedImage || !stitchMask) return
+        if (!normalizedImage || !selection) return
         const { width, height } = normalizedImage
         const newMask = new Uint8Array(width * height).fill(0)
         for (let y = Math.floor(height * 0.2); y < height * 0.8; y++) {
@@ -127,16 +186,19 @@ export function SelectStage() {
                 newMask[y * width + x] = 1
             }
         }
-        setStitchMask(newMask)
+        maskRef.current = newMask
+        isDirtyRef.current = true
+        commitMask()
     }
 
     const handleInvert = () => {
-        if (!stitchMask) return
-        const newMask = new Uint8Array(stitchMask.length)
-        for (let i = 0; i < stitchMask.length; i++) {
-            newMask[i] = stitchMask[i] === 1 ? 0 : 1
+        if (!maskRef.current) return
+        const mask = maskRef.current
+        for (let i = 0; i < mask.length; i++) {
+            mask[i] = mask[i] === 1 ? 0 : 1
         }
-        setStitchMask(newMask)
+        isDirtyRef.current = true
+        commitMask()
     }
 
     if (!normalizedImage) return null
@@ -202,13 +264,23 @@ export function SelectStage() {
 
                     <div className="pt-4 border-t border-gray-100 space-y-2">
                         <button
-                            onClick={() => setStitchMask(new Uint8Array(stitchMask?.length || 0).fill(1))}
+                            onClick={() => {
+                                if (!maskRef.current) return
+                                maskRef.current.fill(1)
+                                isDirtyRef.current = true
+                                commitMask()
+                            }}
                             className="w-full text-left px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded"
                         >
                             Select All
                         </button>
                         <button
-                            onClick={() => setStitchMask(new Uint8Array(stitchMask?.length || 0).fill(0))}
+                            onClick={() => {
+                                if (!maskRef.current) return
+                                maskRef.current.fill(0)
+                                isDirtyRef.current = true
+                                commitMask()
+                            }}
                             className="w-full text-left px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded"
                         >
                             Clear All
@@ -243,7 +315,20 @@ export function SelectStage() {
                             onPointerMove={handlePointerUpdate}
                             onPointerUp={(e) => {
                                 setIsDrawing(false)
+                                commitMask()
                                 e.currentTarget.releasePointerCapture(e.pointerId)
+                            }}
+                            onPointerCancel={(e) => {
+                                setIsDrawing(false)
+                                commitMask()
+                                e.currentTarget.releasePointerCapture(e.pointerId)
+                            }}
+                            onPointerLeave={() => {
+                                // Only commit if we were actually drawing
+                                if (isDrawing) {
+                                    setIsDrawing(false)
+                                    commitMask()
+                                }
                             }}
                             className="max-w-full max-h-full cursor-crosshair touch-none"
                             style={{

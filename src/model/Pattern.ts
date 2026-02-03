@@ -1,7 +1,8 @@
-import type { DmcMetadata, LegendEntry, PaletteMappingEntry, ProcessingConfig, Stitch, RGBColor } from '@/types'
+import type { DmcMetadata, LegendEntry, PaletteMappingEntry, ProcessingConfig, Stitch, RGBColor, SelectionArtifact } from '@/types'
 import { mapPaletteToDmc } from '@/palette/matcher'
 import { quantizeImageToPalette } from '@/processing/pattern-pipeline'
 import { linearRgbToOkLab, okLabDistanceSqWeighted } from '@/processing/color-spaces'
+import { SelectionArtifactModel } from '@/model/SelectionArtifact'
 
 // Pattern is the immutable stitch-grid output of quantization:
 // one stitch per pixel in the normalized source image.
@@ -16,6 +17,8 @@ export class Pattern {
   dmcMetadataByMappedHex: Record<string, DmcMetadata>
   labels: Uint16Array | null
   paletteHex: string[] | null
+  referenceId: string | null
+  selection: SelectionArtifact | null
 
   constructor(
     stitches: Stitch[],
@@ -29,6 +32,8 @@ export class Pattern {
       dmcMetadataByMappedHex?: Record<string, DmcMetadata>
       labels?: Uint16Array | null
       paletteHex?: string[] | null
+      referenceId?: string | null
+      selection?: SelectionArtifact | null
     }
   ) {
     this.stitches = stitches
@@ -41,9 +46,11 @@ export class Pattern {
     this.dmcMetadataByMappedHex = options?.dmcMetadataByMappedHex ?? {}
     this.labels = options?.labels ?? null
     this.paletteHex = options?.paletteHex ?? null
+    this.referenceId = options?.referenceId ?? null
+    this.selection = options?.selection ?? null
   }
 
-  getLegend(options?: { fabricConfig?: { fabricColor: RGBColor, stitchThreshold: number }, mask?: Uint8Array | null }): LegendEntry[] {
+  getLegend(options?: { fabricConfig?: { fabricColor: RGBColor, stitchThreshold: number } }): LegendEntry[] {
     const counts = new Map<string, number>()
     const isMappedToDmc = this.activePaletteMode === 'dmc'
     const totalStitches = this.stitches.length || 1
@@ -59,7 +66,7 @@ export class Pattern {
 
     this.stitches.forEach((stitch, i) => {
       // If mask exists and this pixel is not masked, it's fabric
-      const isExplicitFabric = options?.mask && options.mask[i] === 0
+      const isExplicitFabric = this.selection?.mask && this.selection.mask[i] === 0
       const stitchHex = normalizeHex(stitch.hex)
 
       if (!isExplicitFabric) {
@@ -166,6 +173,8 @@ export class Pattern {
       dmcMetadataByMappedHex: mapping.dmcMetadataByMappedHex,
       labels: this.labels,
       paletteHex: mapping.mappedPalette || this.paletteHex,
+      referenceId: this.referenceId,
+      selection: this.selection,
     })
   }
 
@@ -193,7 +202,14 @@ export class Pattern {
     })
   }
 
-  static fromImageData(image: ImageData, config: ProcessingConfig, mask?: Uint8Array | null): Pattern {
+  static fromImageData(image: ImageData, config: ProcessingConfig, selection?: SelectionArtifact | null): Pattern {
+    if (selection && selection.referenceId) {
+      if (process.env.NODE_ENV === 'development') {
+        SelectionArtifactModel.assertValid(selection, image.width, image.height, selection.referenceId)
+      }
+    }
+
+    const mask = selection?.mask
     const { labels, paletteHex } = quantizeImageToPalette(image, {
       colorCount: config.colorCount,
       ditherMode: config.ditherMode,
@@ -229,12 +245,21 @@ export class Pattern {
       }
     }
 
+    if (selection && selection.referenceId) {
+      if (process.env.NODE_ENV === 'development') {
+        SelectionArtifactModel.assertValid(selection, image.width, image.height, selection.referenceId)
+        SelectionArtifactModel.validateConsistency(selection, stitches.filter(s => s.dmcCode !== 'Fabric').length, image.width * image.height)
+      }
+    }
+
     return new Pattern(stitches, image.width, image.height, {
       rawPalette,
       mappedPalette: null,
       activePaletteMode: 'raw',
       labels,
       paletteHex: rawPalette,
+      referenceId: selection?.referenceId ?? null,
+      selection,
     })
   }
 }

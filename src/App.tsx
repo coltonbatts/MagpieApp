@@ -15,7 +15,7 @@ import { ReferenceStage } from './components/workflow/ReferenceStage'
 import { SelectStage } from './components/workflow/SelectStage'
 
 export default function App() {
-  const { pattern, normalizedImage, stitchMask, processingConfig, setPattern } = usePatternStore()
+  const { pattern, normalizedImage, referenceId, selection, processingConfig, setPattern } = usePatternStore()
   const { workflowStage } = useUIStore()
   const [showDMCTester, setShowDMCTester] = useState(false)
   const isDev = import.meta.env.DEV
@@ -32,31 +32,19 @@ export default function App() {
     const debugColor = isDev && window.localStorage.getItem('magpie:debugColor') === '1'
     if (debugColor) logNormalizedImageDebug(normalizedImage)
 
-    const rawPattern = Pattern.fromImageData(normalizedImage, processingConfig, stitchMask)
+    const rawPattern = Pattern.fromImageData(normalizedImage, processingConfig, selection)
     if (debugColor) logPatternPaletteDebug(rawPattern)
 
     const nextPattern = processingConfig.useDmcPalette
       ? rawPattern.withDmcPaletteMapping()
       : rawPattern
 
-    const patternWithFabric = new Pattern(nextPattern.stitches, nextPattern.width, nextPattern.height, {
-      ...nextPattern,
-      // @ts-ignore
-      fabricConfig: {
-        fabricColor: processingConfig.fabricColor,
-        stitchThreshold: processingConfig.stitchThreshold,
-        mask: stitchMask
-      }
-    })
-
-    setPattern(patternWithFabric)
+    setPattern(nextPattern)
   }, [
     normalizedImage,
-    stitchMask,
+    referenceId,
+    selection?.id,
     processingConfig,
-    processingConfig.useDmcPalette,
-    processingConfig.fabricColor,
-    processingConfig.stitchThreshold,
     setPattern,
     isDev
   ])

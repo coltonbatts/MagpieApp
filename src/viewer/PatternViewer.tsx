@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useMemo } from 'react'
 import type * as PIXINamespace from 'pixi.js'
 import type { Viewport } from 'pixi-viewport'
 import { Pattern } from '@/model/Pattern'
+import { SelectionArtifact, ProcessingConfig } from '@/types'
 import { VIEWER } from '@/lib/constants'
 import { createViewport, fitViewportToWorld } from './viewport-config'
 import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
 import { linearRgbToOkLab, okLabDistanceSqWeighted } from '@/processing/color-spaces'
-import { getProcessedPaths, type Point, type Path } from '@/processing/vectorize'
+import { getProcessedPaths, type Point } from '@/processing/vectorize'
 import { Button, SegmentedControl, Toggle } from '@/components/ui'
 
 interface PatternViewerProps {
@@ -80,6 +81,8 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
           `world: ${viewport.worldWidth} x ${viewport.worldHeight}`,
           `bounds: l=${viewport.left.toFixed(2)} t=${viewport.top.toFixed(2)} r=${viewport.right.toFixed(2)} b=${viewport.bottom.toFixed(2)}`,
           `screen: ${viewport.screenWidth} x ${viewport.screenHeight}`,
+          `refId: ${pattern?.referenceId || 'none'}`,
+          `selId: ${pattern?.selection?.id || 'none'}`,
         ].join('\n')
       )
     }
@@ -224,6 +227,16 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
     const worldHeight = pattern.height * VIEWER.CELL_SIZE
     worldSizeRef.current = { width: worldWidth, height: worldHeight }
 
+    const fabricIndices = getFabricIndices(pattern, processingConfig)
+    const paths = useMemo(() => {
+      if (!pattern || !pattern.labels || !pattern.paletteHex) return []
+      return getProcessedPaths(pattern.labels, pattern.width, pattern.height, fabricIndices, {
+        simplify: 0.4,
+        smooth: 3,
+        manualMask: pattern.selection?.mask
+      })
+    }, [pattern, fabricIndices, processingConfig.organicPreview])
+
     viewportRef.current.removeChildren()
     renderPattern(pixiRef.current, viewportRef.current, pattern, {
       activeTab,
@@ -231,7 +244,9 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
       showGrid,
       showLabels,
       showOutlines,
-      config: processingConfig
+      config: processingConfig,
+      selection: pattern.selection,
+      paths // Pass memoized paths
     })
     fitViewportToWorld(viewportRef.current, worldWidth, worldHeight)
     hasUserTransformedViewportRef.current = false
@@ -319,7 +334,9 @@ interface RenderOptions {
   showGrid: boolean
   showLabels: boolean
   showOutlines: boolean
-  config: any
+  config: ProcessingConfig
+  selection: SelectionArtifact | null
+  paths: any[]
 }
 
 function renderPattern(
@@ -345,7 +362,7 @@ function renderPattern(
   if (activeTab === 'finished') {
     renderFinishedPreview(PIXI, viewport, pattern, options, fabricIndices)
   } else {
-    renderPatternPreview(PIXI, viewport, pattern, options, fabricIndices)
+    renderPatternPreview(PIXI, viewport, pattern, options)
   }
 }
 
@@ -356,15 +373,11 @@ function renderFinishedPreview(
   options: RenderOptions,
   fabricIndices: Set<number>
 ) {
-  const { config } = options
+  const { config, paths } = options
   const cellSize = VIEWER.CELL_SIZE
 
   if (config.organicPreview && pattern.labels && pattern.paletteHex) {
     // Vector Organic Look
-    const paths = getProcessedPaths(pattern.labels, pattern.width, pattern.height, fabricIndices, {
-      simplify: 0.4,
-      smooth: 3
-    })
     paths.forEach(path => {
       if (path.isFabric) return
       const color = parseInt(pattern.paletteHex![path.label].slice(1), 16)
@@ -379,8 +392,14 @@ function renderFinishedPreview(
     const stitchLayer = new PIXI.Graphics()
     const gap = 1.5
     const radius = 2
+    const mask = pattern.selection?.mask
 
-    pattern.stitches.forEach((stitch) => {
+    pattern.stitches.forEach((stitch, i) => {
+      if (stitch.dmcCode === 'Fabric') return
+
+      // Skip if explicitly masked out by user
+      if (mask && mask[i] === 0) return
+
       const colorIdx = pattern.rawPalette.indexOf(stitch.hex.toUpperCase())
       if (fabricIndices.has(colorIdx)) return
 
@@ -403,10 +422,9 @@ function renderPatternPreview(
   PIXI: typeof PIXINamespace,
   viewport: Viewport,
   pattern: Pattern,
-  options: RenderOptions,
-  fabricIndices: Set<number>
+  options: RenderOptions
 ) {
-  const { showGrid, showLabels, showOutlines } = options
+  const { showGrid, showLabels, showOutlines, paths } = options
   const cellSize = VIEWER.CELL_SIZE
 
   // 1. Grid (Drawn first so it's behind if needed)
@@ -428,12 +446,7 @@ function renderPatternPreview(
 
   // 2. Vector Paths and Labels
   if (pattern.labels && pattern.paletteHex) {
-    const paths = getProcessedPaths(pattern.labels, pattern.width, pattern.height, fabricIndices, {
-      simplify: 0.4,
-      smooth: 3
-    })
-
-    paths.forEach((path: Path) => {
+    paths.forEach((path: any) => {
       if (path.isFabric) return
 
       // Outline
@@ -477,7 +490,7 @@ function getBoundingBoxCenter(points: Array<{ x: number, y: number }>): { x: num
   return { x: (minX + maxX) / 2, y: (minY + maxY) / 2 }
 }
 
-function getFabricIndices(pattern: Pattern, config: any): Set<number> {
+function getFabricIndices(pattern: Pattern, config: ProcessingConfig): Set<number> {
   const fabricIndices = new Set<number>()
   if (!pattern.paletteHex) return fabricIndices
 
