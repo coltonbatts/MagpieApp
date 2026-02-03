@@ -4,7 +4,7 @@ import { useEffect, useState } from 'react'
 import { Button, Input, Panel } from './ui'
 
 export function FabricPanel() {
-  const { processingConfig, setProcessingConfig } = usePatternStore()
+  const { processingConfig, setFabricSetup, setProcessingConfig } = usePatternStore()
   const [hsv, setHsv] = useState<[number, number, number]>([0, 0, 96])
   const [showAdvanced, setShowAdvanced] = useState(false)
 
@@ -16,7 +16,7 @@ export function FabricPanel() {
   const updateColor = (h: number, s: number, v: number) => {
     setHsv([h, s, v])
     const [r, g, b] = hsvToRgb(h, s, v)
-    setProcessingConfig({ fabricColor: { r, g, b } })
+    setFabricSetup({ color: { r, g, b } })
   }
 
   const fabricHex = `#${processingConfig.fabricColor.r

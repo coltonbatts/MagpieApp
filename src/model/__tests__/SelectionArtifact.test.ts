@@ -59,4 +59,63 @@ describe('SelectionArtifactModel', () => {
         expect(updated.mask).toBe(nextMask)
         expect(updated.referenceId).toBe(refId)
     })
+
+    it('resampleMaskNearest deterministically downsamples and upsamples', () => {
+        const source4x4 = new Uint8Array([
+            1, 1, 0, 0,
+            1, 1, 0, 0,
+            0, 0, 1, 1,
+            0, 0, 1, 1,
+        ])
+
+        const down2x2 = SelectionArtifactModel.resampleMaskNearest(source4x4, 4, 4, 2, 2)
+        expect(Array.from(down2x2)).toEqual([
+            1, 0,
+            0, 1,
+        ])
+
+        const up4x4 = SelectionArtifactModel.resampleMaskNearest(down2x2, 2, 2, 4, 4)
+        expect(Array.from(up4x4)).toEqual([
+            1, 1, 0, 0,
+            1, 1, 0, 0,
+            0, 0, 1, 1,
+            0, 0, 1, 1,
+        ])
+    })
+
+    it('resampleTo creates a build-compatible selection that still passes contract checks', () => {
+        const workingSelection = SelectionArtifactModel.createDefault(8, 6, refId)
+        const buildSelection = SelectionArtifactModel.resampleTo(workingSelection, 4, 3)
+
+        expect(buildSelection.referenceId).toBe(refId)
+        expect(buildSelection.width).toBe(4)
+        expect(buildSelection.height).toBe(3)
+        expect(buildSelection.mask.length).toBe(12)
+
+        expect(() => {
+            SelectionArtifactModel.assertValid(buildSelection, 4, 3, refId)
+        }).not.toThrow()
+    })
+
+    it('resampleTo preserves select-all intent for default selections', () => {
+        const workingSelection = SelectionArtifactModel.createDefault(8, 6, refId)
+        const buildSelection = SelectionArtifactModel.resampleTo(workingSelection, 4, 3)
+        expect(buildSelection.isDefault).toBe(true)
+        expect(Array.from(buildSelection.mask)).toEqual(new Array(12).fill(1))
+    })
+
+    it('resampleMaskNearest fallback keeps sparse selections from collapsing to empty', () => {
+        const sparse4x4 = new Uint8Array([
+            1, 0, 1, 0,
+            0, 0, 0, 0,
+            1, 0, 1, 0,
+            0, 0, 0, 0,
+        ])
+
+        const down2x2 = SelectionArtifactModel.resampleMaskNearest(sparse4x4, 4, 4, 2, 2)
+        expect(Array.from(down2x2)).toEqual([
+            1, 1,
+            1, 1,
+        ])
+    })
 })

@@ -3,6 +3,7 @@ import { ControlPanel } from './components/ControlPanel'
 import { Layout } from './components/Layout'
 import { Legend } from './components/Legend'
 import { Pattern } from './model/Pattern'
+import { SelectionArtifactModel } from './model/SelectionArtifact'
 import { usePatternStore } from './store/pattern-store'
 import { useUIStore } from './store/ui-store'
 import { PatternViewer } from './viewer/PatternViewer'
@@ -11,6 +12,7 @@ import { logNormalizedImageDebug, logPatternPaletteDebug } from './processing/de
 import { runPatternColorSanityTest } from './model/pattern-color.sanity'
 
 import { WorkflowStepper } from './components/workflow/WorkflowStepper'
+import { FabricStage } from './components/workflow/FabricStage'
 import { ReferenceStage } from './components/workflow/ReferenceStage'
 import { SelectStage } from './components/workflow/SelectStage'
 
@@ -32,8 +34,18 @@ export default function App() {
     const debugColor = isDev && window.localStorage.getItem('magpie:debugColor') === '1'
     if (debugColor) logNormalizedImageDebug(normalizedImage)
 
-    const rawPattern = Pattern.fromImageData(normalizedImage, processingConfig, selection)
+    const selectionForBuildRaw = selection
+      ? SelectionArtifactModel.resampleTo(selection, normalizedImage.width, normalizedImage.height)
+      : null
+    const selectionSelectedCount = selectionForBuildRaw ? countSelectedPixels(selectionForBuildRaw.mask) : 0
+    const selectionForBuild =
+      selectionForBuildRaw && selectionSelectedCount > 0 ? selectionForBuildRaw : null
+
+    const rawPattern = Pattern.fromImageData(normalizedImage, processingConfig, selectionForBuild)
     if (debugColor) logPatternPaletteDebug(rawPattern)
+    if (isDev && selectionForBuildRaw && selectionSelectedCount === 0) {
+      console.warn('[Magpie][SelectionBridge] Empty build mask detected; falling back to unmasked build render.')
+    }
 
     const nextPattern = processingConfig.useDmcPalette
       ? rawPattern.withDmcPaletteMapping()
@@ -70,6 +82,8 @@ export default function App() {
 
   const renderStage = () => {
     switch (workflowStage) {
+      case 'Fabric':
+        return <FabricStage />
       case 'Reference':
         return <ReferenceStage />
       case 'Select':
@@ -84,7 +98,7 @@ export default function App() {
           />
         )
       default:
-        return <ReferenceStage />
+        return <FabricStage />
     }
   }
 
@@ -108,4 +122,12 @@ export default function App() {
       </main>
     </div>
   )
+}
+
+function countSelectedPixels(mask: Uint8Array): number {
+  let selected = 0
+  for (let i = 0; i < mask.length; i += 1) {
+    if (mask[i] > 0) selected += 1
+  }
+  return selected
 }

@@ -13,7 +13,7 @@ interface UIState {
 export const useUIStore = create<UIState>((set) => ({
   showGrid: true,
   showMarkers: false,
-  workflowStage: 'Reference',
+  workflowStage: 'Fabric',
   setShowGrid: (showGrid) => set({ showGrid }),
   setShowMarkers: (showMarkers) => set({ showMarkers }),
   setWorkflowStage: (stage) => set({ workflowStage: stage }),

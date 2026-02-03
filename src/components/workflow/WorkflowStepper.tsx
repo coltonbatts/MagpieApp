@@ -3,15 +3,16 @@ import { useUIStore } from '@/store/ui-store'
 import { WorkflowStage } from '@/types'
 
 const STAGES: { id: WorkflowStage; label: string }[] = [
-  { id: 'Reference', label: '1. Reference' },
-  { id: 'Select', label: '2. Select' },
-  { id: 'Build', label: '3. Build' },
-  { id: 'Export', label: '4. Export' },
+  { id: 'Fabric', label: '1. Fabric + Hoop' },
+  { id: 'Reference', label: '2. Reference' },
+  { id: 'Select', label: '3. Select' },
+  { id: 'Build', label: '4. Build' },
+  { id: 'Export', label: '5. Export' },
 ]
 
 export function WorkflowStepper() {
   const { workflowStage, setWorkflowStage } = useUIStore()
-  const { normalizedImage } = usePatternStore()
+  const { originalImage, normalizedImage, selectionWorkingImage } = usePatternStore()
 
   return (
     <nav className="border-b border-border bg-surface/95 backdrop-blur">
@@ -24,7 +25,10 @@ export function WorkflowStepper() {
           <div className="flex items-center gap-2">
             {STAGES.map((stage, idx) => {
               const isActive = workflowStage === stage.id
-              const isDisabled = idx > 0 && !normalizedImage
+              const isDisabled =
+                stage.id === 'Select'
+                  ? !originalImage || !selectionWorkingImage
+                  : (stage.id === 'Build' || stage.id === 'Export') && !normalizedImage
 
               return (
                 <div key={stage.id} className="flex items-center">

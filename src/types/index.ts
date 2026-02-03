@@ -57,7 +57,9 @@ export interface LegendEntry {
 export interface ProcessingConfig {
   colorCount: number
   ditherMode: 'none' | 'bayer' | 'floyd-steinberg'
-  targetSize: number // shortest side in pixels
+  targetSize: number // shortest side in pixels for Build quantization
+  selectionWorkingSize: number // shortest side in pixels for SelectStage editing
+  selectionMaxMegapixels: number // hard cap to protect memory during selection
   useDmcPalette: boolean
   smoothingAmount: number // 0..1
   simplifyAmount: number // 0..1
@@ -85,7 +87,32 @@ export interface ExportOptions {
   includeLegend?: boolean
   stitchSizePx?: number
 }
-export type WorkflowStage = 'Reference' | 'Select' | 'Build' | 'Export'
+export type WorkflowStage = 'Fabric' | 'Reference' | 'Select' | 'Build' | 'Export'
+
+export type HoopShape = 'round' | 'oval' | 'square'
+
+export interface HoopConfig {
+  presetId: string
+  label: string
+  shape: HoopShape
+  widthMm: number
+  heightMm: number
+}
+
+export interface FabricSetup {
+  type: 'linen' | 'aida' | 'evenweave'
+  texture: 'natural' | 'soft' | 'coarse'
+  count: 11 | 14 | 16 | 18
+  color: RGBColor
+  hoop: HoopConfig
+}
+
+export interface ReferencePlacement {
+  x: number
+  y: number
+  width: number
+  height: number
+}
 
 export interface MaskConfig {
   brushSize: number

@@ -59,6 +59,18 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
   const [isReady, setIsReady] = useState(false)
   const [debugText, setDebugText] = useState('')
   const isDev = import.meta.env.DEV
+  const fabricIndices = useMemo(
+    () => (pattern ? getFabricIndices(pattern, processingConfig) : new Set<number>()),
+    [pattern, processingConfig]
+  )
+  const paths = useMemo(() => {
+    if (!pattern || !pattern.labels || !pattern.paletteHex) return []
+    return getProcessedPaths(pattern.labels, pattern.width, pattern.height, fabricIndices, {
+      simplify: 0.4,
+      smooth: 3,
+      manualMask: pattern.selection?.mask
+    })
+  }, [pattern, fabricIndices, processingConfig.organicPreview])
 
   useEffect(() => {
     const container = containerRef.current
@@ -66,21 +78,24 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
 
     let canceled = false
     let resizeObserver: ResizeObserver | null = null
-    let stopDebugTicker: (() => void) | null = null
-
     const updateDebugText = () => {
       if (!isDev) return
       const viewport = viewportRef.current
       if (!viewport) return
 
       const center = viewport.center
+      const selectionMask = pattern?.selection?.mask
+      const selectionSelected = selectionMask ? countSelected(selectionMask) : -1
+      const selectionTotal = selectionMask ? selectionMask.length : -1
+      const stitchedCount = pattern ? pattern.stitches.reduce((acc, stitch) => acc + (stitch.dmcCode !== 'Fabric' ? 1 : 0), 0) : -1
+      const totalStitches = pattern ? pattern.stitches.length : -1
       setDebugText(
         [
+          `selPx: ${selectionSelected >= 0 ? selectionSelected : 'none'} / ${selectionTotal >= 0 ? selectionTotal : 'none'}`,
+          `stitches: ${stitchedCount >= 0 ? stitchedCount : 'none'} / ${totalStitches >= 0 ? totalStitches : 'none'}`,
           `scale: ${viewport.scale.x.toFixed(4)} x ${viewport.scale.y.toFixed(4)}`,
           `center: ${center.x.toFixed(2)}, ${center.y.toFixed(2)}`,
           `world: ${viewport.worldWidth} x ${viewport.worldHeight}`,
-          `bounds: l=${viewport.left.toFixed(2)} t=${viewport.top.toFixed(2)} r=${viewport.right.toFixed(2)} b=${viewport.bottom.toFixed(2)}`,
-          `screen: ${viewport.screenWidth} x ${viewport.screenHeight}`,
           `refId: ${pattern?.referenceId || 'none'}`,
           `selId: ${pattern?.selection?.id || 'none'}`,
         ].join('\n')
@@ -154,11 +169,6 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
         setIsReady(true)
         updateDebugText()
 
-        if (isDev) {
-          const interval = window.setInterval(updateDebugText, 150)
-          stopDebugTicker = () => window.clearInterval(interval)
-        }
-
         resizeObserver = new ResizeObserver(handleResize)
         resizeObserver.observe(containerRef.current)
       })
@@ -170,7 +180,6 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
     return () => {
       canceled = true
       resizeObserver?.disconnect()
-      stopDebugTicker?.()
       appRef.current?.destroy(true, { children: true, texture: true })
       appRef.current = null
       viewportRef.current = null
@@ -197,8 +206,6 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
           `scale: ${viewportRef.current.scale.x.toFixed(4)} x ${viewportRef.current.scale.y.toFixed(4)}`,
           `center: ${center.x.toFixed(2)}, ${center.y.toFixed(2)}`,
           `world: ${viewportRef.current.worldWidth} x ${viewportRef.current.worldHeight}`,
-          `bounds: l=${viewportRef.current.left.toFixed(2)} t=${viewportRef.current.top.toFixed(2)} r=${viewportRef.current.right.toFixed(2)} b=${viewportRef.current.bottom.toFixed(2)}`,
-          `screen: ${viewportRef.current.screenWidth} x ${viewportRef.current.screenHeight}`,
         ].join('\n')
       )
     }
@@ -226,16 +233,6 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
     const worldWidth = pattern.width * VIEWER.CELL_SIZE
     const worldHeight = pattern.height * VIEWER.CELL_SIZE
     worldSizeRef.current = { width: worldWidth, height: worldHeight }
-
-    const fabricIndices = getFabricIndices(pattern, processingConfig)
-    const paths = useMemo(() => {
-      if (!pattern || !pattern.labels || !pattern.paletteHex) return []
-      return getProcessedPaths(pattern.labels, pattern.width, pattern.height, fabricIndices, {
-        simplify: 0.4,
-        smooth: 3,
-        manualMask: pattern.selection?.mask
-      })
-    }, [pattern, fabricIndices, processingConfig.organicPreview])
 
     viewportRef.current.removeChildren()
     renderPattern(pixiRef.current, viewportRef.current, pattern, {
@@ -315,7 +312,7 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
         </div>
       </div>
       {isDev && debugText && (
-        <pre className="pointer-events-none absolute bottom-4 left-4 z-10 whitespace-pre rounded-md border border-border bg-overlay/95 px-3 py-2 font-mono text-[11px] leading-4 text-fg-muted shadow-sm">
+        <pre className="pointer-events-none absolute top-14 left-4 z-10 whitespace-pre rounded-md border border-border bg-overlay/95 px-3 py-2 font-mono text-[11px] leading-4 text-fg-muted shadow-sm">
           {debugText}
         </pre>
       )}
@@ -326,6 +323,14 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
       )}
     </div>
   )
+}
+
+function countSelected(mask: Uint8Array): number {
+  let selected = 0
+  for (let i = 0; i < mask.length; i += 1) {
+    if (mask[i] > 0) selected += 1
+  }
+  return selected
 }
 
 interface RenderOptions {

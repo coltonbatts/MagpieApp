@@ -45,6 +45,8 @@ export function runPatternColorSanityTest() {
     colorCount: 4,
     ditherMode: 'none',
     targetSize: 4,
+    selectionWorkingSize: 4,
+    selectionMaxMegapixels: 1,
     useDmcPalette: false,
     smoothingAmount: 0,
     simplifyAmount: 0,

@@ -32,6 +32,36 @@ export function normalizeImage(
     targetShortestSide
   )
 
+  return normalizeBitmapToImageData(bitmap, width, height)
+}
+
+export function normalizeImageCapped(
+  bitmap: ImageBitmap,
+  targetShortestSide: number,
+  maxMegapixels: number
+): ImageData {
+  const base = getNormalizedDimensions(bitmap.width, bitmap.height, targetShortestSide)
+  const maxPixels = Math.max(1, Math.floor(maxMegapixels * 1_000_000))
+  const currentPixels = base.width * base.height
+
+  if (currentPixels <= maxPixels) {
+    return normalizeBitmapToImageData(bitmap, base.width, base.height)
+  }
+
+  // Cap selection buffers by total pixels so large uploads don't allocate extreme masks.
+  const downscale = Math.sqrt(maxPixels / currentPixels)
+  const width = Math.max(1, Math.floor(base.width * downscale))
+  const height = Math.max(1, Math.floor(base.height * downscale))
+
+  return normalizeBitmapToImageData(bitmap, width, height)
+}
+
+function normalizeBitmapToImageData(
+  bitmap: ImageBitmap,
+  width: number,
+  height: number
+): ImageData {
+
   const canvas =
     typeof OffscreenCanvas !== 'undefined'
       ? new OffscreenCanvas(width, height)
@@ -42,8 +72,9 @@ export function normalizeImage(
     throw new Error('Could not create 2D canvas context for normalization.')
   }
 
-  // Keep normalization deterministic: nearest-neighbor resize, then raw RGBA extraction.
-  context.imageSmoothingEnabled = false
+  // Use high-quality resampling for the working grid to avoid harsh aliasing during stage previews.
+  context.imageSmoothingEnabled = true
+  context.imageSmoothingQuality = 'high'
   context.drawImage(bitmap, 0, 0, width, height)
 
   return context.getImageData(0, 0, width, height)

@@ -6,7 +6,7 @@ import { SelectionArtifact } from '@/types'
  * This represents the authoritative logic for managing the SelectionArtifact contract.
  *
  * INVARIANTS:
- * 1. Dimensions (width/height) MUST match the ReferenceImage exactly.
+ * 1. Dimensions (width/height) MUST match the active selection working image.
  * 2. referenceId MUST match the currently active image ID.
  * 3. mask.length MUST exactly equal width * height.
  */
@@ -85,6 +85,78 @@ export const SelectionArtifactModel = {
     },
 
     /**
+     * Deterministically resamples a binary selection mask to a new grid.
+     * Uses nearest-neighbor to preserve hard mask edges.
+     */
+    resampleTo(selection: SelectionArtifact, targetWidth: number, targetHeight: number): SelectionArtifact {
+        const width = Math.max(1, Math.floor(targetWidth))
+        const height = Math.max(1, Math.floor(targetHeight))
+        this.assertValidMask(selection.mask, selection.width, selection.height)
+
+        if (selection.isDefault) {
+            return {
+                ...selection,
+                id: `${selection.id}_rs_${width}x${height}`,
+                width,
+                height,
+                mask: new Uint8Array(width * height).fill(1),
+            }
+        }
+
+        if (selection.width === width && selection.height === height) {
+            return selection
+        }
+
+        const resampled = this.resampleMaskNearest(
+            selection.mask,
+            selection.width,
+            selection.height,
+            width,
+            height
+        )
+
+        return {
+            ...selection,
+            id: `${selection.id}_rs_${width}x${height}`,
+            width,
+            height,
+            mask: resampled,
+        }
+    },
+
+    resampleMaskNearest(
+        mask: Uint8Array,
+        sourceWidth: number,
+        sourceHeight: number,
+        targetWidth: number,
+        targetHeight: number
+    ): Uint8Array {
+        const srcW = Math.max(1, Math.floor(sourceWidth))
+        const srcH = Math.max(1, Math.floor(sourceHeight))
+        const dstW = Math.max(1, Math.floor(targetWidth))
+        const dstH = Math.max(1, Math.floor(targetHeight))
+        this.assertValidMask(mask, srcW, srcH)
+
+        const sourceSelected = countSelected(mask)
+        const isDownsampling = srcW > dstW || srcH > dstH
+        const result = resampleNearest(
+            mask,
+            srcW,
+            srcH,
+            dstW,
+            dstH,
+            isDownsampling ? 'center' : 'origin'
+        )
+
+        if (!isDownsampling || sourceSelected === 0 || countSelected(result) > 0) {
+            return result
+        }
+
+        // Fallback alignment for pathological downsample alignments that can erase sparse selections.
+        return resampleNearest(mask, srcW, srcH, dstW, dstH, 'origin')
+    },
+
+    /**
      * Dev-only consistency check for Pattern consumers.
      * Confirms that stitch counts match mask coverage expectations.
      */
@@ -100,4 +172,42 @@ export const SelectionArtifactModel = {
             console.log(`[SelectionContract] Consistency check passed: ${stitchCount} stitches (Mask allows ${maskStitchCount}, Total pixels: ${totalPixels})`)
         }
     }
+}
+
+function resampleNearest(
+    mask: Uint8Array,
+    sourceWidth: number,
+    sourceHeight: number,
+    targetWidth: number,
+    targetHeight: number,
+    alignment: 'center' | 'origin'
+): Uint8Array {
+    const result = new Uint8Array(targetWidth * targetHeight)
+    const scaleX = sourceWidth / targetWidth
+    const scaleY = sourceHeight / targetHeight
+
+    for (let y = 0; y < targetHeight; y += 1) {
+        const srcY = alignment === 'center'
+            ? Math.max(0, Math.min(sourceHeight - 1, Math.floor((y + 0.5) * scaleY - 0.5)))
+            : Math.max(0, Math.min(sourceHeight - 1, Math.floor(y * scaleY)))
+        const srcYOff = srcY * sourceWidth
+        const dstYOff = y * targetWidth
+        for (let x = 0; x < targetWidth; x += 1) {
+            const srcX = alignment === 'center'
+                ? Math.max(0, Math.min(sourceWidth - 1, Math.floor((x + 0.5) * scaleX - 0.5)))
+                : Math.max(0, Math.min(sourceWidth - 1, Math.floor(x * scaleX)))
+            const srcValue = mask[srcYOff + srcX]
+            result[dstYOff + x] = srcValue > 0 ? 1 : 0
+        }
+    }
+
+    return result
+}
+
+function countSelected(mask: Uint8Array): number {
+    let selected = 0
+    for (let i = 0; i < mask.length; i += 1) {
+        if (mask[i] > 0) selected += 1
+    }
+    return selected
 }

@@ -24,7 +24,7 @@ export function ControlPanel() {
     })
   }
 
-  if (workflowStage === 'Reference' || workflowStage === 'Select') return null
+  if (workflowStage === 'Fabric' || workflowStage === 'Reference' || workflowStage === 'Select') return null
 
   return (
     <div className="flex h-full flex-col overflow-hidden border-l border-border bg-surface">

@@ -4,7 +4,7 @@ import { useUIStore } from '@/store/ui-store'
 import { SelectionArtifactModel } from '@/model/SelectionArtifact'
 
 export function SelectStage() {
-    const { normalizedImage, referenceId, selection, setSelection, maskConfig, setMaskConfig } = usePatternStore()
+    const { selectionWorkingImage, referenceId, selection, fabricSetup, setSelection, maskConfig, setMaskConfig } = usePatternStore()
     const { setWorkflowStage } = useUIStore()
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const [isDrawing, setIsDrawing] = useState(false)
@@ -26,19 +26,19 @@ export function SelectStage() {
 
     // Initialize selection if it doesn't exist
     useEffect(() => {
-        if (normalizedImage && referenceId && !selection) {
+        if (selectionWorkingImage && referenceId && !selection) {
             setSelection(SelectionArtifactModel.createDefault(
-                normalizedImage.width,
-                normalizedImage.height,
+                selectionWorkingImage.width,
+                selectionWorkingImage.height,
                 referenceId
             ))
         }
-    }, [normalizedImage, referenceId, selection, setSelection])
+    }, [selectionWorkingImage, referenceId, selection, setSelection])
 
     // Pre-calculate the dimming overlay whenever dimensions or mask opacity change
     useEffect(() => {
-        if (!normalizedImage) return
-        const { width, height } = normalizedImage
+        if (!selectionWorkingImage) return
+        const { width, height } = selectionWorkingImage
         const canvas = document.createElement('canvas')
         canvas.width = width
         canvas.height = height
@@ -49,26 +49,34 @@ export function SelectStage() {
         }
         offscreenOverlayRef.current = canvas
         isDirtyRef.current = true
-    }, [normalizedImage, maskConfig.opacity])
+    }, [selectionWorkingImage, maskConfig.opacity])
 
     const drawMask = useCallback(() => {
         const canvas = canvasRef.current
         const mask = maskRef.current
-        if (!canvas || !normalizedImage || !mask) return
+        if (!canvas || !selectionWorkingImage || !mask) return
 
         const ctx = canvas.getContext('2d')
         if (!ctx) return
 
-        const { width, height } = normalizedImage
+        const { width, height } = selectionWorkingImage
         if (canvas.width !== width) {
             canvas.width = width
             canvas.height = height
         }
 
-        // 1. Draw original image
-        ctx.putImageData(normalizedImage, 0, 0)
+        // 1. Draw fabric context and clip to hoop bounds.
+        ctx.fillStyle = `rgb(${fabricSetup.color.r}, ${fabricSetup.color.g}, ${fabricSetup.color.b})`
+        ctx.fillRect(0, 0, width, height)
+        ctx.save()
+        applyHoopClip(ctx, fabricSetup.hoop.shape, width, height)
 
-        // 2. Draw mask overlay (Blue tint for stitched area)
+        // 2. Draw original working image
+        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingQuality = 'high'
+        ctx.putImageData(selectionWorkingImage, 0, 0)
+
+        // 3. Draw mask overlay (Blue tint for stitched area)
         const maskImgData = ctx.createImageData(width, height)
         const alpha = Math.round(maskConfig.opacity * 255)
 
@@ -92,7 +100,7 @@ export function SelectStage() {
         tempCanvas.getContext('2d')?.putImageData(maskImgData, 0, 0)
         ctx.drawImage(tempCanvas, 0, 0)
 
-        // 3. Draw semi-transparent dimming over fabric area
+        // 4. Draw semi-transparent dimming over fabric area
         if (offscreenOverlayRef.current) {
             ctx.save()
             // Draw the full dimming overlay
@@ -113,8 +121,10 @@ export function SelectStage() {
             ctx.restore()
         }
 
+        ctx.restore()
+
         isDirtyRef.current = false
-    }, [normalizedImage, maskConfig.opacity])
+    }, [selectionWorkingImage, maskConfig.opacity, fabricSetup.color, fabricSetup.hoop.shape])
 
     // rAF loop for smooth rendering
     useEffect(() => {
@@ -130,7 +140,7 @@ export function SelectStage() {
     }, [drawMask])
 
     const handlePointerUpdate = (e: React.PointerEvent<HTMLCanvasElement>) => {
-        if (!isDrawing || !normalizedImage || !selection || !maskRef.current) return
+        if (!isDrawing || !selectionWorkingImage || !selection || !maskRef.current) return
 
         const canvas = canvasRef.current
         if (!canvas) return
@@ -141,6 +151,8 @@ export function SelectStage() {
 
         const x = Math.floor((e.clientX - rect.left) * scaleX)
         const y = Math.floor((e.clientY - rect.top) * scaleY)
+
+        if (!isInsideHoop(x, y, canvas.width, canvas.height, fabricSetup.hoop.shape)) return
 
         const radius = Math.max(1, Math.floor(maskConfig.brushSize / (rect.width / canvas.width) / 2))
         const mask = maskRef.current
@@ -178,8 +190,8 @@ export function SelectStage() {
     }
 
     const handleAutoSubject = () => {
-        if (!normalizedImage || !selection) return
-        const { width, height } = normalizedImage
+        if (!selectionWorkingImage || !selection) return
+        const { width, height } = selectionWorkingImage
         const newMask = new Uint8Array(width * height).fill(0)
         for (let y = Math.floor(height * 0.2); y < height * 0.8; y++) {
             for (let x = Math.floor(width * 0.2); x < width * 0.8; x++) {
@@ -201,7 +213,7 @@ export function SelectStage() {
         commitMask()
     }
 
-    if (!normalizedImage) return null
+    if (!selectionWorkingImage) return null
 
     return (
         <div className="flex flex-col h-full bg-gray-50 overflow-hidden">
@@ -332,7 +344,6 @@ export function SelectStage() {
                             }}
                             className="max-w-full max-h-full cursor-crosshair touch-none"
                             style={{
-                                imageRendering: 'pixelated',
                                 width: 'auto',
                                 height: '500px' // Practical default
                             }}
@@ -363,4 +374,41 @@ export function SelectStage() {
             </div>
         </div>
     )
+}
+
+function applyHoopClip(
+    ctx: CanvasRenderingContext2D,
+    shape: 'round' | 'oval' | 'square',
+    width: number,
+    height: number
+) {
+    ctx.beginPath()
+    if (shape === 'round') {
+        const radius = Math.min(width, height) / 2
+        ctx.arc(width / 2, height / 2, radius, 0, Math.PI * 2)
+    } else if (shape === 'oval') {
+        ctx.ellipse(width / 2, height / 2, width / 2, height / 2, 0, 0, Math.PI * 2)
+    } else {
+        ctx.rect(0, 0, width, height)
+    }
+    ctx.clip()
+}
+
+function isInsideHoop(
+    x: number,
+    y: number,
+    width: number,
+    height: number,
+    shape: 'round' | 'oval' | 'square'
+) {
+    if (shape === 'square') return true
+    if (shape === 'round') {
+        const radius = Math.min(width, height) / 2
+        const dx = x - width / 2
+        const dy = y - height / 2
+        return (dx * dx) + (dy * dy) <= radius * radius
+    }
+    const nx = (x - width / 2) / (width / 2)
+    const ny = (y - height / 2) / (height / 2)
+    return (nx * nx) + (ny * ny) <= 1
 }

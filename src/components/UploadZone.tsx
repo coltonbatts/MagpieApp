@@ -1,16 +1,18 @@
 import { useRef } from 'react'
 import { FILE_UPLOAD } from '@/lib/constants'
 import { validateImageFile } from '@/lib/validation'
-import { loadImageBitmap, normalizeImage } from '@/processing/image-utils'
+import { loadImageBitmap, normalizeImage, normalizeImageCapped } from '@/processing/image-utils'
 import { usePatternStore } from '@/store/pattern-store'
 
 export function UploadZone() {
   const inputRef = useRef<HTMLInputElement>(null)
   const {
+    originalImage,
     normalizedImage,
+    selectionWorkingImage,
     processingConfig,
     setOriginalImage,
-    setNormalizedImage,
+    setSourceImages,
     setIsProcessing,
     setError,
   } = usePatternStore()
@@ -27,9 +29,14 @@ export function UploadZone() {
 
     try {
       const bitmap = await loadImageBitmap(file)
-      const normalized = normalizeImage(bitmap, processingConfig.targetSize)
+      const buildImage = normalizeImage(bitmap, processingConfig.targetSize)
+      const selectionImage = normalizeImageCapped(
+        bitmap,
+        processingConfig.selectionWorkingSize,
+        processingConfig.selectionMaxMegapixels
+      )
       setOriginalImage(bitmap)
-      setNormalizedImage(normalized)
+      setSourceImages(buildImage, selectionImage)
     } catch (error) {
       console.error('Image upload failed:', error)
       setError('Failed to read image. Please try another file.')
@@ -65,9 +72,9 @@ export function UploadZone() {
         </span>
       </button>
 
-      {normalizedImage && (
+      {normalizedImage && selectionWorkingImage && originalImage && (
         <p className="text-xs text-gray-600">
-          Normalized to {normalizedImage.width} x {normalizedImage.height} px
+          Source {originalImage.width} x {originalImage.height}px, selection grid {selectionWorkingImage.width} x {selectionWorkingImage.height}px, build grid {normalizedImage.width} x {normalizedImage.height}px
         </p>
       )}
     </div>
