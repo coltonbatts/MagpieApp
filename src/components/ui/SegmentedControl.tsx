@@ -11,6 +11,7 @@ export interface SegmentedControlProps<TValue extends string> {
   onValueChange: (value: TValue) => void
   options: Array<SegmentedOption<TValue>>
   className?: string
+  ariaLabel?: string
 }
 
 export function SegmentedControl<TValue extends string>({
@@ -18,11 +19,12 @@ export function SegmentedControl<TValue extends string>({
   onValueChange,
   options,
   className,
+  ariaLabel = 'Segmented control',
 }: SegmentedControlProps<TValue>) {
   return (
     <div
       role="tablist"
-      aria-label="Segmented control"
+      aria-label={ariaLabel}
       className={cn(
         'inline-flex items-center rounded-md border border-border bg-surface-2 p-0.5',
         className
@@ -44,8 +46,8 @@ export function SegmentedControl<TValue extends string>({
               'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
               'disabled:pointer-events-none disabled:opacity-45',
               isActive
-                ? 'bg-surface text-fg shadow-sm'
-                : 'text-fg-muted hover:bg-surface/60'
+                ? 'border border-border bg-surface text-fg shadow-sm'
+                : 'border border-transparent text-fg-muted hover:bg-surface/60 hover:text-fg'
             )}
           >
             {option.label}
@@ -55,4 +57,3 @@ export function SegmentedControl<TValue extends string>({
     </div>
   )
 }
-

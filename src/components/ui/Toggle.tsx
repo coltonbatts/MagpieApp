@@ -25,7 +25,7 @@ export function Toggle({
       className={cn(
         'relative inline-flex h-6 w-10 items-center rounded-full border border-border',
         'transition-colors duration-180 ease-standard',
-        checked ? 'bg-accent-soft' : 'bg-surface-2',
+        checked ? 'bg-accent-soft border-border-strong' : 'bg-surface-2',
         'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:ring-offset-2 focus-visible:ring-offset-bg',
         'disabled:pointer-events-none disabled:opacity-45',
         className
@@ -35,12 +35,11 @@ export function Toggle({
       <span
         aria-hidden="true"
         className={cn(
-          'inline-block h-5 w-5 rounded-full border border-border bg-surface shadow-sm',
+          'inline-block h-4 w-4 rounded-full border bg-surface shadow-sm',
           'transition-transform duration-180 ease-standard',
-          checked ? 'translate-x-4' : 'translate-x-0.5'
+          checked ? 'translate-x-5 border-border-strong' : 'translate-x-1 border-border'
         )}
       />
     </button>
   )
 }
-

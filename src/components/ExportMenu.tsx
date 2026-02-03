@@ -3,6 +3,7 @@ import { useExport } from '@/hooks/useExport'
 import { usePatternStore } from '@/store/pattern-store'
 import { exportLegendCsv } from '@/exports/csv-export'
 import { generatePatternSVG } from '@/exports/pattern-svg-export'
+import { Button, Input, Panel, Select } from './ui'
 
 export function ExportMenu() {
   const [includeGrid, setIncludeGrid] = useState(true)
@@ -83,7 +84,7 @@ export function ExportMenu() {
     } finally {
       setIsExportingCsv(false)
     }
-  }, [pattern])
+  }, [pattern, processingConfig])
 
   const handleExportSvg = useCallback(() => {
     if (!pattern) return
@@ -127,89 +128,96 @@ export function ExportMenu() {
   }, [canExport, handleExport, isExportingCsv, isExportingPng])
 
   return (
-    <div className="space-y-3 rounded border border-gray-200 p-3">
-      <div className="text-sm font-medium text-gray-800">Export</div>
+    <Panel
+      title={<span className="text-sm font-semibold text-fg">Export</span>}
+      variant="inset"
+    >
+      <div className="space-y-3">
+        <div className="space-y-2.5">
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
+            <Input
+              type="checkbox"
+              variant="checkbox"
+              checked={includeGrid}
+              onChange={(e) => setIncludeGrid(e.target.checked)}
+            />
+            Include grid overlay
+          </label>
 
-      <label className="flex items-center gap-2 text-xs text-gray-700">
-        <input
-          type="checkbox"
-          checked={includeGrid}
-          onChange={(e) => setIncludeGrid(e.target.checked)}
-          className="h-4 w-4 accent-gray-900"
-        />
-        Include grid overlay
-      </label>
+          <label className="flex items-center gap-2 text-xs text-fg-muted">
+            <Input
+              type="checkbox"
+              variant="checkbox"
+              checked={includeLegend}
+              onChange={(e) => setIncludeLegend(e.target.checked)}
+            />
+            Include legend overlay
+          </label>
+        </div>
 
-      <label className="flex items-center gap-2 text-xs text-gray-700">
-        <input
-          type="checkbox"
-          checked={includeLegend}
-          onChange={(e) => setIncludeLegend(e.target.checked)}
-          className="h-4 w-4 accent-gray-900"
-        />
-        Include legend overlay
-      </label>
+        <label className="block text-xs text-fg-muted">
+          <span className="mb-1 block">Stitch size (px)</span>
+          <Select
+            value={stitchSizePx}
+            onChange={(e) => setStitchSizePx(parseInt(e.target.value, 10))}
+          >
+            {[4, 8, 10, 12, 16].map((size) => (
+              <option key={size} value={size}>
+                {size}px
+              </option>
+            ))}
+          </Select>
+        </label>
 
-      <label className="block text-xs text-gray-700">
-        <span className="mb-1 block">Stitch size (px)</span>
-        <select
-          value={stitchSizePx}
-          onChange={(e) => setStitchSizePx(parseInt(e.target.value, 10))}
-          className="w-full rounded border border-gray-300 bg-white px-2 py-1 text-sm text-gray-800"
-        >
-          {[4, 8, 10, 12, 16].map((size) => (
-            <option key={size} value={size}>
-              {size}px
-            </option>
-          ))}
-        </select>
-      </label>
+        <div className="space-y-2">
+          <Button
+            type="button"
+            onClick={handleExport}
+            disabled={exportDisabled}
+            variant="primary"
+            className="w-full"
+          >
+            {isExportingPng ? 'Downloading…' : 'Download Preview PNG'}
+          </Button>
 
-      <div className="space-y-2">
-        <button
-          type="button"
-          onClick={handleExport}
-          disabled={exportDisabled}
-          className="w-full rounded bg-gray-900 px-3 py-2 text-sm font-medium text-white hover:bg-gray-800 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {isExportingPng ? 'Downloading…' : 'Download Preview PNG'}
-        </button>
+          <Button
+            type="button"
+            onClick={handleExportCsv}
+            disabled={exportDisabled}
+            variant="secondary"
+            className="w-full"
+          >
+            {isExportingCsv ? 'Downloading…' : 'Download Palette/Thread List CSV'}
+          </Button>
 
-        <button
-          type="button"
-          onClick={handleExportCsv}
-          disabled={exportDisabled}
-          className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {isExportingCsv ? 'Downloading…' : 'Download Palette/Thread List CSV'}
-        </button>
+          <Button
+            type="button"
+            onClick={handleExportSvg}
+            disabled={exportDisabled}
+            variant="secondary"
+            className="w-full"
+          >
+            {isExportingSvg ? 'Downloading…' : 'Download Printable Pattern SVG'}
+          </Button>
+        </div>
 
-        <button
-          type="button"
-          onClick={handleExportSvg}
-          disabled={exportDisabled}
-          className="w-full rounded border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          {isExportingSvg ? 'Downloading…' : 'Download Printable Pattern SVG'}
-        </button>
+        {!canExport && (
+          <p className="text-xs text-amber-700">Load an image/pattern first.</p>
+        )}
+
+        {canExport && (
+          <p className="text-[11px] text-fg-subtle">Shortcut: {shortcutHint}</p>
+        )}
+
+        {statusNote && <p className="text-xs text-fg-muted">{statusNote}</p>}
+        {exportError && <p className="text-xs text-red-600">Export failed: {exportError}</p>}
+
+        {isDev && lastExportNote && (
+          <p className="text-[11px] font-mono text-fg-subtle">
+            Export checksum: {lastExportNote}
+          </p>
+        )}
       </div>
-
-      {!canExport && (
-        <p className="text-xs text-amber-700">Load an image/pattern first.</p>
-      )}
-
-      {canExport && (
-        <p className="text-[11px] text-gray-500">Shortcut: {shortcutHint}</p>
-      )}
-
-      {statusNote && <p className="text-xs text-gray-600">{statusNote}</p>}
-      {exportError && <p className="text-xs text-red-600">Export failed: {exportError}</p>}
-
-      {isDev && lastExportNote && (
-        <p className="text-[11px] font-mono text-gray-500">
-          Export checksum: {lastExportNote}
-        </p>
-      )}
-    </div>
+    </Panel>
   )
 }

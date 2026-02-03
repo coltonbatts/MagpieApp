@@ -4,6 +4,7 @@ import { useUIStore } from '@/store/ui-store'
 import { ExportMenu } from './ExportMenu'
 import { FabricPanel } from './FabricPanel'
 import { useState } from 'react'
+import { Button, Input, Panel } from './ui'
 
 export function ControlPanel() {
   const { processingConfig, isProcessing, error, setProcessingConfig } = usePatternStore()
@@ -26,143 +27,166 @@ export function ControlPanel() {
   if (workflowStage === 'Reference' || workflowStage === 'Select') return null
 
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-white border-l border-gray-200">
-      <div className="flex-1 overflow-y-auto p-6 space-y-8">
+    <div className="flex h-full flex-col overflow-hidden border-l border-border bg-surface">
+      <div className="flex-1 space-y-6 overflow-y-auto p-5">
         <div>
-          <h2 className="text-lg font-bold text-gray-900 mb-6 flex items-center">
+          <h2 className="mb-5 flex items-center text-lg font-semibold text-fg">
             <span className="mr-2">🛠️</span> Build Controls
           </h2>
 
-          <div className="space-y-6">
+          <div className="space-y-5">
             <FabricPanel />
 
-            <div className="space-y-4">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Subject Detail</h3>
+            <Panel
+              title={
+                <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
+                  Subject Detail
+                </span>
+              }
+              className="space-y-4"
+            >
+              <div className="space-y-4">
+                <div>
+                  <label className="mb-2 flex justify-between text-sm font-medium text-fg-muted">
+                    <span>Number of Colors</span>
+                    <span className="rounded border border-border bg-surface-2 px-2 py-0.5 text-xs text-fg">
+                      {processingConfig.colorCount}
+                    </span>
+                  </label>
+                  <Input
+                    type="range"
+                    variant="slider"
+                    min={PROCESSING.MIN_COLORS}
+                    max={PROCESSING.MAX_COLORS}
+                    value={processingConfig.colorCount}
+                    onChange={(e) =>
+                      setProcessingConfig({ colorCount: parseInt(e.target.value, 10) })
+                    }
+                  />
+                </div>
 
-              <div>
-                <label className="flex justify-between text-sm font-medium text-gray-700 mb-2">
-                  <span>Number of Colors</span>
-                  <span className="bg-gray-100 px-2 py-0.5 rounded text-xs">{processingConfig.colorCount}</span>
-                </label>
-                <input
-                  type="range"
-                  min={PROCESSING.MIN_COLORS}
-                  max={PROCESSING.MAX_COLORS}
-                  value={processingConfig.colorCount}
-                  onChange={(e) =>
-                    setProcessingConfig({ colorCount: parseInt(e.target.value, 10) })
-                  }
-                  className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                />
-              </div>
-
-              <div>
-                <label className="flex justify-between text-sm font-medium text-gray-700 mb-2">
-                  <span>Organic Detail</span>
-                  <span className="bg-gray-100 px-2 py-0.5 rounded text-xs">
-                    {organicDetail < 0.3 ? 'Coarse' : organicDetail > 0.7 ? 'Fine' : 'Balanced'}
-                  </span>
-                </label>
-                <input
-                  type="range"
-                  min={0}
-                  max={1}
-                  step={0.01}
-                  value={organicDetail}
-                  onChange={(e) => handleOrganicDetailChange(parseFloat(e.target.value))}
-                  className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                />
-                <div className="flex justify-between text-[10px] text-gray-400 mt-1 uppercase">
-                  <span>Coarse</span>
-                  <span>Fine</span>
+                <div>
+                  <label className="mb-2 flex justify-between text-sm font-medium text-fg-muted">
+                    <span>Organic Detail</span>
+                    <span className="rounded border border-border bg-surface-2 px-2 py-0.5 text-xs text-fg">
+                      {organicDetail < 0.3 ? 'Coarse' : organicDetail > 0.7 ? 'Fine' : 'Balanced'}
+                    </span>
+                  </label>
+                  <Input
+                    type="range"
+                    variant="slider"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={organicDetail}
+                    onChange={(e) => handleOrganicDetailChange(parseFloat(e.target.value))}
+                  />
+                  <div className="mt-1 flex justify-between text-[10px] uppercase text-fg-subtle">
+                    <span>Coarse</span>
+                    <span>Fine</span>
+                  </div>
                 </div>
               </div>
-            </div>
+            </Panel>
 
-            <div className="space-y-4">
-              <h3 className="text-xs font-bold uppercase tracking-wider text-gray-500">Palette</h3>
-              <label className="flex items-center gap-3 p-3 bg-gray-50 rounded-lg border border-gray-100 cursor-pointer hover:bg-gray-100 transition-colors">
-                <input
+            <Panel
+              title={
+                <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
+                  Palette
+                </span>
+              }
+            >
+              <label className="flex cursor-pointer items-center gap-3 rounded-md border border-border bg-surface-2/70 px-3 py-2.5 transition-colors hover:bg-surface-2">
+                <Input
                   type="checkbox"
+                  variant="checkbox"
                   checked={processingConfig.useDmcPalette}
                   onChange={(e) => setProcessingConfig({ useDmcPalette: e.target.checked })}
-                  className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                 />
-                <span className="text-sm font-medium text-gray-700">Map to DMC Thread Colors</span>
+                <span className="text-sm font-medium text-fg-muted">Map to DMC Thread Colors</span>
               </label>
-            </div>
+            </Panel>
 
             <div>
-              <button
+              <Button
                 onClick={() => setShowAdvanced(!showAdvanced)}
-                className="text-xs text-blue-600 hover:text-blue-800 font-medium flex items-center"
+                variant="ghost"
+                size="sm"
+                className="h-7 px-1 text-xs text-fg-muted hover:text-fg"
               >
                 {showAdvanced ? 'Hide Advanced Settings' : 'Show Advanced Settings'}
-              </button>
+              </Button>
 
               {showAdvanced && (
-                <div className="mt-4 pt-4 border-t border-gray-100 space-y-4 animate-in fade-in duration-300">
+                <Panel
+                  variant="inset"
+                  className="mt-3 space-y-4 border-border/80"
+                >
                   <div>
-                    <label className="mb-2 block text-xs font-medium text-gray-500">
+                    <label className="mb-2 block text-xs font-medium text-fg-subtle">
                       Target Size: {processingConfig.targetSize}px
                     </label>
-                    <input
+                    <Input
                       type="range"
+                      variant="slider"
                       min={PROCESSING.MIN_TARGET_SIZE}
                       max={PROCESSING.MAX_TARGET_SIZE}
                       value={processingConfig.targetSize}
                       onChange={(e) =>
                         setProcessingConfig({ targetSize: parseInt(e.target.value, 10) })
                       }
-                      className="w-full h-1 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-gray-400"
                     />
                   </div>
 
-                  <label className="flex items-center gap-2 text-xs text-gray-500">
-                    <input
+                  <label className="flex items-center gap-2 text-xs text-fg-subtle">
+                    <Input
                       type="checkbox"
+                      variant="checkbox"
                       checked={processingConfig.organicPreview}
                       onChange={(e) => setProcessingConfig({ organicPreview: e.target.checked })}
-                      className="h-4 w-4 rounded border-gray-300"
                     />
                     Organic Preview (Curved Regions)
                   </label>
-                </div>
+                </Panel>
               )}
             </div>
           </div>
         </div>
       </div>
 
-      <div className="p-6 border-t border-gray-200 bg-gray-50 space-y-4">
+      <div className="space-y-3 border-t border-border bg-surface-2/65 p-5">
         {workflowStage === 'Build' ? (
-          <button
+          <Button
             onClick={() => setWorkflowStage('Export')}
-            className="w-full py-3 bg-blue-600 text-white rounded-xl font-bold hover:bg-blue-700 shadow-lg shadow-blue-100 transition-all"
+            variant="primary"
+            className="h-10 w-full font-semibold"
           >
             Continue to Export
-          </button>
+          </Button>
         ) : (
           <ExportMenu />
         )}
 
-        <button
+        <Button
           onClick={() => setWorkflowStage('Select')}
-          className="w-full py-2 text-sm font-medium text-gray-500 hover:text-gray-700"
+          variant="ghost"
+          className="h-8 w-full text-sm text-fg-muted hover:text-fg"
         >
           Back to Selection
-        </button>
+        </Button>
 
         {isProcessing && (
-          <div className="flex items-center justify-center space-x-2 py-2">
-            <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce"></div>
-            <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce [animation-delay:-.15s]"></div>
-            <div className="w-2 h-2 bg-blue-600 rounded-full animate-bounce [animation-delay:-.3s]"></div>
-            <span className="text-xs font-medium text-blue-600 ml-2">Processing...</span>
+          <div className="flex items-center justify-center gap-2 py-1">
+            <div className="h-1.5 w-1.5 rounded-full bg-accent/70 animate-pulse" />
+            <span className="text-xs font-medium text-fg-muted">Processing...</span>
           </div>
         )}
 
-        {error && <p className="text-xs text-red-600 text-center bg-red-50 p-2 rounded">{error}</p>}
+        {error && (
+          <p className="rounded border border-red-200 bg-red-50 p-2 text-center text-xs text-red-600">
+            {error}
+          </p>
+        )}
       </div>
     </div>
   )

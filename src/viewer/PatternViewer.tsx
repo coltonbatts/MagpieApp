@@ -8,10 +8,16 @@ import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
 import { linearRgbToOkLab, okLabDistanceSqWeighted } from '@/processing/color-spaces'
 import { getProcessedPaths, type Point, type Path } from '@/processing/vectorize'
+import { Button, SegmentedControl, Toggle } from '@/components/ui'
 
 interface PatternViewerProps {
   pattern: Pattern | null
 }
+
+const VIEWER_TABS: Array<{ value: 'finished' | 'pattern'; label: string }> = [
+  { value: 'finished', label: 'Finished' },
+  { value: 'pattern', label: 'Pattern' },
+]
 
 export function PatternViewer({ pattern }: PatternViewerProps) {
   const { workflowStage } = useUIStore()
@@ -233,7 +239,7 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
 
   if (viewerError) {
     return (
-      <div className="flex h-full w-full items-center justify-center bg-gray-100 text-sm text-red-600">
+      <div className="flex h-full w-full items-center justify-center bg-surface-2 text-sm text-red-600">
         {viewerError}
       </div>
     )
@@ -246,100 +252,60 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
         className="h-full w-full"
         style={{ touchAction: 'none' }}
       />
-      <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 flex items-center gap-1 rounded-lg bg-white/95 p-1 shadow-lg ring-1 ring-black/10">
-        <button
-          onClick={() => setActiveTab('finished')}
-          className={`px-4 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTab === 'finished'
-            ? 'bg-blue-500 text-white shadow-sm'
-            : 'text-gray-600 hover:bg-gray-100'
-            }`}
-        >
-          Finished
-        </button>
-        <button
-          onClick={() => setActiveTab('pattern')}
-          className={`px-4 py-1.5 text-xs font-medium rounded-md transition-colors ${activeTab === 'pattern'
-            ? 'bg-blue-500 text-white shadow-sm'
-            : 'text-gray-600 hover:bg-gray-100'
-            }`}
-        >
-          Pattern
-        </button>
+      <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-lg border border-border bg-overlay/95 p-1 shadow-sm backdrop-blur">
+        <SegmentedControl
+          value={activeTab}
+          onValueChange={setActiveTab}
+          options={VIEWER_TABS}
+          ariaLabel="Viewer mode"
+        />
       </div>
 
       <div className="absolute left-4 top-4 z-10 flex flex-col gap-2">
         {activeTab === 'finished' ? (
-          <div className="flex items-center gap-2 rounded-lg bg-white/95 px-3 py-2 shadow-sm ring-1 ring-black/5">
-            <input
-              type="checkbox"
-              id="showStitchedOnly"
-              checked={showStitchedOnly}
-              onChange={(e) => setShowStitchedOnly(e.target.checked)}
-              className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600"
-            />
-            <label htmlFor="showStitchedOnly" className="text-xs font-medium text-gray-700 select-none">
-              Stitched Only
-            </label>
+          <div className="flex items-center gap-3 rounded-lg border border-border bg-overlay/95 px-3 py-2 shadow-sm backdrop-blur">
+            <span className="select-none text-xs font-medium text-fg-muted">Stitched Only</span>
+            <Toggle checked={showStitchedOnly} onCheckedChange={setShowStitchedOnly} />
           </div>
         ) : (
-          <div className="flex flex-col gap-1.5 rounded-lg bg-white/95 p-2 shadow-sm ring-1 ring-black/5">
-            <div className="flex items-center gap-2 px-1">
-              <input
-                type="checkbox"
-                id="showGrid"
-                checked={showGrid}
-                onChange={(e) => setShowGrid(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600"
-              />
-              <label htmlFor="showGrid" className="text-xs font-medium text-gray-700 select-none">
-                Grid
-              </label>
+          <div className="flex flex-col gap-2 rounded-lg border border-border bg-overlay/95 p-2 shadow-sm backdrop-blur">
+            <div className="flex items-center justify-between gap-4 rounded-md px-1 py-0.5">
+              <span className="select-none text-xs font-medium text-fg-muted">Grid</span>
+              <Toggle checked={showGrid} onCheckedChange={setShowGrid} />
             </div>
-            <div className="flex items-center gap-2 px-1">
-              <input
-                type="checkbox"
-                id="showLabels"
-                checked={showLabels}
-                onChange={(e) => setShowLabels(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600"
-              />
-              <label htmlFor="showLabels" className="text-xs font-medium text-gray-700 select-none">
-                Labels
-              </label>
+            <div className="flex items-center justify-between gap-4 rounded-md px-1 py-0.5">
+              <span className="select-none text-xs font-medium text-fg-muted">Labels</span>
+              <Toggle checked={showLabels} onCheckedChange={setShowLabels} />
             </div>
-            <div className="flex items-center gap-2 px-1">
-              <input
-                type="checkbox"
-                id="showOutlines"
-                checked={showOutlines}
-                onChange={(e) => setShowOutlines(e.target.checked)}
-                className="h-3.5 w-3.5 rounded border-gray-300 text-blue-600"
-              />
-              <label htmlFor="showOutlines" className="text-xs font-medium text-gray-700 select-none">
-                Outlines
-              </label>
+            <div className="flex items-center justify-between gap-4 rounded-md px-1 py-0.5">
+              <span className="select-none text-xs font-medium text-fg-muted">Outlines</span>
+              <Toggle checked={showOutlines} onCheckedChange={setShowOutlines} />
             </div>
           </div>
         )}
       </div>
 
       <div className="absolute right-4 top-4 z-10">
-        <button
-          type="button"
-          onClick={handleFitToView}
-          disabled={!pattern}
-          className="rounded bg-white/95 px-3 py-1.5 text-sm text-gray-800 shadow ring-1 ring-black/10 disabled:cursor-not-allowed disabled:opacity-40"
-        >
-          Fit
-        </button>
+        <div className="rounded-lg border border-border bg-overlay/95 p-1 shadow-sm backdrop-blur">
+          <Button
+            type="button"
+            onClick={handleFitToView}
+            disabled={!pattern}
+            size="sm"
+            variant="secondary"
+            className="min-w-14"
+          >
+            Fit
+          </Button>
+        </div>
       </div>
       {isDev && debugText && (
-        <pre className="pointer-events-none absolute bottom-4 left-4 z-10 whitespace-pre rounded bg-black/80 px-3 py-2 font-mono text-[11px] leading-4 text-green-200">
+        <pre className="pointer-events-none absolute bottom-4 left-4 z-10 whitespace-pre rounded-md border border-border bg-overlay/95 px-3 py-2 font-mono text-[11px] leading-4 text-fg-muted shadow-sm">
           {debugText}
         </pre>
       )}
       {!pattern && (
-        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-gray-600">
+        <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-fg-muted">
           Upload an image to generate a pattern
         </div>
       )}

@@ -11,17 +11,17 @@ export interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANT: Record<ButtonVariant, string> = {
   primary:
-    'bg-accent text-accent-fg border border-transparent hover:bg-accent/90 active:bg-accent/85',
+    'bg-accent-soft text-fg border border-border-strong shadow-sm hover:bg-accent-soft/85 active:bg-accent-soft/75',
   secondary:
     'bg-surface text-fg border border-border hover:bg-surface-2 active:bg-surface-2/80',
   ghost:
     'bg-transparent text-fg border border-transparent hover:bg-surface-2 active:bg-surface-2/80',
   danger:
-    'bg-red-600 text-white border border-transparent hover:bg-red-500 active:bg-red-600/90',
+    'bg-surface text-fg border border-border-strong hover:bg-surface-2 active:bg-surface-2/80',
 }
 
 const SIZE: Record<ButtonSize, string> = {
-  sm: 'h-8 px-3 text-[13px]',
+  sm: 'h-9 px-3 text-[13px]',
   md: 'h-9 px-3.5 text-sm',
 }
 
@@ -50,4 +50,3 @@ export function Button({
     />
   )
 }
-
