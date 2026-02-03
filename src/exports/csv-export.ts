@@ -1,10 +1,10 @@
 import { Pattern } from '@/model/Pattern'
-import { downloadBlob } from '@/exports/download'
 import type { RGBColor } from '@/types'
 
-interface CsvExportResult {
+export interface CsvExportResult {
   fileName: string
   rowCount: number
+  contents: string
 }
 
 export function exportLegendCsv(pattern: Pattern, options?: { fabricColor: RGBColor, stitchThreshold: number }): CsvExportResult {
@@ -45,11 +45,8 @@ export function exportLegendCsv(pattern: Pattern, options?: { fabricColor: RGBCo
       .map((row) => row.map(csvEscape).join(','))
       .join('\r\n') + '\r\n'
 
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
   const fileName = `magpie-threads-${mode}.csv`
-  downloadBlob(blob, fileName)
-
-  return { fileName, rowCount: legend.length }
+  return { fileName, rowCount: legend.length, contents: csv }
 }
 
 function csvEscape(value: string) {

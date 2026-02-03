@@ -3,7 +3,14 @@ import { useExport } from '@/hooks/useExport'
 import { usePatternStore } from '@/store/pattern-store'
 import { exportLegendCsv } from '@/exports/csv-export'
 import { generatePatternSVG } from '@/exports/pattern-svg-export'
+import { getPlatformAdapter } from '@/platform'
+import { generatePrintDocument } from '@/print/print-document'
 import { Button, Input, Panel, Select } from './ui'
+
+function resolveDefaultPrintPageSize(): 'A4' | 'Letter' {
+  const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US'
+  return locale.startsWith('en-US') ? 'Letter' : 'A4'
+}
 
 export function ExportMenu() {
   const [includeGrid, setIncludeGrid] = useState(true)
@@ -15,12 +22,13 @@ export function ExportMenu() {
   const [isExportingPng, setIsExportingPng] = useState(false)
   const [isExportingCsv, setIsExportingCsv] = useState(false)
   const [isExportingSvg, setIsExportingSvg] = useState(false)
+  const [isPrinting, setIsPrinting] = useState(false)
   const isDev = import.meta.env.DEV
   const pattern = usePatternStore((state) => state.pattern)
   const processingConfig = usePatternStore((state) => state.processingConfig)
   const { canExport, exportCurrentPng } = useExport()
 
-  const exportDisabled = !canExport || isExportingPng || isExportingCsv || isExportingSvg
+  const exportDisabled = !canExport || isExportingPng || isExportingCsv || isExportingSvg || isPrinting
 
   const shortcutHint = useMemo(() => {
     const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform)
@@ -41,7 +49,7 @@ export function ExportMenu() {
       })
 
       if (result) {
-        setStatusNote(`Downloaded ${result.fileName}`)
+        setStatusNote(`Saved ${result.fileName}`)
       }
 
       if (!result || !isDev) {
@@ -68,14 +76,22 @@ export function ExportMenu() {
     stitchSizePx,
   ])
 
-  const handleExportCsv = useCallback(() => {
+  const handleExportCsv = useCallback(async () => {
     if (!pattern) return
     try {
       setExportError(null)
       setStatusNote(null)
       setIsExportingCsv(true)
       const result = exportLegendCsv(pattern, processingConfig)
-      setStatusNote(`Downloaded ${result.fileName}`)
+      const platform = await getPlatformAdapter()
+      const path = await platform.selectSavePath({
+        defaultFileName: result.fileName,
+        title: 'Save thread list CSV',
+        filters: [{ name: 'CSV file', extensions: ['csv'] }],
+      })
+      if (!path) return
+      await platform.writeFile({ path, contents: result.contents })
+      setStatusNote(`Saved ${result.fileName}`)
     } catch (error) {
       const message =
         error instanceof Error ? error.message : 'Unknown CSV export failure.'
@@ -86,21 +102,23 @@ export function ExportMenu() {
     }
   }, [pattern, processingConfig])
 
-  const handleExportSvg = useCallback(() => {
+  const handleExportSvg = useCallback(async () => {
     if (!pattern) return
     try {
       setExportError(null)
       setStatusNote(null)
       setIsExportingSvg(true)
       const svg = generatePatternSVG(pattern, processingConfig)
-      const blob = new Blob([svg], { type: 'image/svg+xml' })
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `magpie-pattern-${Date.now()}.svg`
-      link.click()
-      URL.revokeObjectURL(url)
-      setStatusNote(`Downloaded SVG pattern`)
+      const fileName = `magpie-pattern-${Date.now()}.svg`
+      const platform = await getPlatformAdapter()
+      const path = await platform.selectSavePath({
+        defaultFileName: fileName,
+        title: 'Save printable SVG',
+        filters: [{ name: 'SVG image', extensions: ['svg'] }],
+      })
+      if (!path) return
+      await platform.writeFile({ path, contents: svg })
+      setStatusNote('Saved SVG pattern')
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Unknown SVG export failure.'
       console.error('svg export failed', { reason: message })
@@ -110,22 +128,58 @@ export function ExportMenu() {
     }
   }, [pattern, processingConfig])
 
+  const handlePrint = useCallback(async (pageSizeOverride?: 'A4' | 'Letter') => {
+    if (!pattern) return
+    try {
+      setExportError(null)
+      setStatusNote(null)
+      setIsPrinting(true)
+
+      const svg = generatePatternSVG(pattern, processingConfig)
+      const pageSize = pageSizeOverride ?? resolveDefaultPrintPageSize()
+      const printHtml = generatePrintDocument({
+        title: 'Magpie Pattern',
+        svgMarkup: svg,
+        pageSize,
+      })
+      const platform = await getPlatformAdapter()
+      await platform.printDocument({
+        title: 'Magpie Pattern',
+        html: printHtml,
+      })
+      setStatusNote(`Opened print dialog (${pageSize}).`)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown print failure.'
+      console.error('print failed', { reason: message })
+      setExportError(message)
+    } finally {
+      setIsPrinting(false)
+    }
+  }, [pattern, processingConfig])
+
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
-      const isSave =
-        (event.key === 's' || event.key === 'S') && (event.metaKey || event.ctrlKey)
-      if (!isSave) return
+      const withMeta = event.metaKey || event.ctrlKey
+      const isSave = (event.key === 's' || event.key === 'S') && withMeta
+      const isPrint = (event.key === 'p' || event.key === 'P') && withMeta
+      if (!isSave && !isPrint) return
       if (event.defaultPrevented) return
       if (!canExport) return
       event.preventDefault()
-      if (!isExportingPng && !isExportingCsv) {
+      if (isPrint && !isPrinting) {
+        const defaultPageSize = resolveDefaultPrintPageSize()
+        const alternatePageSize = defaultPageSize === 'Letter' ? 'A4' : 'Letter'
+        void handlePrint(event.shiftKey ? alternatePageSize : defaultPageSize)
+        return
+      }
+      if (!isExportingPng && !isExportingCsv && !isPrinting) {
         void handleExport()
       }
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [canExport, handleExport, isExportingCsv, isExportingPng])
+  }, [canExport, handleExport, handlePrint, isExportingCsv, isExportingPng, isPrinting])
 
   return (
     <Panel
@@ -206,7 +260,9 @@ export function ExportMenu() {
         )}
 
         {canExport && (
-          <p className="text-[11px] text-fg-subtle">Shortcut: {shortcutHint}</p>
+          <p className="text-[11px] text-fg-subtle">
+            Shortcuts: {shortcutHint} save PNG, {shortcutHint.replace('S', 'P')} print (Shift+P for alternate paper)
+          </p>
         )}
 
         {statusNote && <p className="text-xs text-fg-muted">{statusNote}</p>}

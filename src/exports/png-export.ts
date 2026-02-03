@@ -1,13 +1,13 @@
 import type { ExportOptions } from '@/types'
 import { Pattern } from '@/model/Pattern'
-import { downloadBlob } from '@/exports/download'
 
-interface PngExportResult {
+export interface PngExportResult {
   width: number
   height: number
   paletteEntryCount: number
   fileName: string
   stitchSizePx: number
+  blob: Blob
 }
 
 const DEFAULT_STITCH_SIZE_PX = 10
@@ -151,7 +151,6 @@ export function exportPng(
       console.info('export rendered', {
         byteSize: blob.size,
       })
-      downloadBlob(blob, fileName)
 
       return {
         width,
@@ -159,6 +158,7 @@ export function exportPng(
         paletteEntryCount: legendEntries.length,
         fileName,
         stitchSizePx,
+        blob,
       }
     })
     .catch((error: unknown) => {

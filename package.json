@@ -8,9 +8,12 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "desktop:dev": "tauri dev",
+    "desktop:build": "tauri build"
   },
   "dependencies": {
+    "@tauri-apps/api": "^2.10.1",
     "chroma-js": "^3.1.2",
     "jspdf": "^3.0.4",
     "pixi-viewport": "^6.0.3",
@@ -20,6 +23,7 @@
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.10.0",
     "@types/node": "^22.18.0",
     "@types/react": "^18.3.23",
     "@types/react-dom": "^18.3.7",

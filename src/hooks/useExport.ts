@@ -1,4 +1,5 @@
 import { exportPng } from '@/exports/png-export'
+import { getPlatformAdapter } from '@/platform'
 import { usePatternStore } from '@/store/pattern-store'
 
 interface ExportPngOptions {
@@ -15,12 +16,28 @@ export function useExport() {
       return null
     }
 
-    return exportPng(pattern, {
+    const result = await exportPng(pattern, {
       format: 'png-clean',
       includeGrid: options.includeGrid,
       includeLegend: options.includeLegend,
       stitchSizePx: options.stitchSizePx,
     })
+
+    const platform = await getPlatformAdapter()
+    const path = await platform.selectSavePath({
+      defaultFileName: result.fileName,
+      title: 'Save preview PNG',
+      filters: [{ name: 'PNG image', extensions: ['png'] }],
+    })
+
+    if (!path) {
+      return null
+    }
+
+    const bytes = new Uint8Array(await result.blob.arrayBuffer())
+    await platform.writeFile({ path, contents: bytes })
+
+    return result
   }
 
   return {
