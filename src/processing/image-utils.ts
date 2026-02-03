@@ -42,6 +42,7 @@ export function normalizeImage(
     throw new Error('Could not create 2D canvas context for normalization.')
   }
 
+  // Keep normalization deterministic: nearest-neighbor resize, then raw RGBA extraction.
   context.imageSmoothingEnabled = false
   context.drawImage(bitmap, 0, 0, width, height)
 

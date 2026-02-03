@@ -28,18 +28,40 @@ export interface Stitch {
   hex: string
 }
 
+export interface DmcMetadata {
+  code: string
+  name: string
+  hex: string
+}
+
+export interface PaletteMappingEntry {
+  originalHex: string
+  mappedHex: string
+  dmc: DmcMetadata
+}
+
 export interface LegendEntry {
   dmcCode: string
   name: string
   hex: string
+  rawHex: string
+  mappedHex: string | null
+  isMappedToDmc: boolean
+  coverage: number
   stitchCount: number
   markerReused: boolean
+  mappedFromCount?: number
+  mappedFromHexes?: string[]
 }
 
 export interface ProcessingConfig {
   colorCount: number
   ditherMode: 'none' | 'bayer' | 'floyd-steinberg'
   targetSize: number // shortest side in pixels
+  useDmcPalette: boolean
+  smoothingAmount: number // 0..1
+  simplifyAmount: number // 0..1
+  minRegionSize: number // pixels (connected component size)
 }
 
 export interface ViewerConfig {
@@ -54,4 +76,6 @@ export interface ExportOptions {
   pageSize?: 'A4' | 'A3' | 'Letter'
   includeMarkers?: boolean
   includeGrid?: boolean
+  includeLegend?: boolean
+  stitchSizePx?: number
 }

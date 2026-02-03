@@ -11,7 +11,7 @@ interface PatternState {
   error: string | null
   setOriginalImage: (image: ImageBitmap) => void
   setNormalizedImage: (image: ImageData) => void
-  setPattern: (pattern: Pattern) => void
+  setPattern: (pattern: Pattern | null) => void
   setProcessingConfig: (config: Partial<ProcessingConfig>) => void
   setIsProcessing: (isProcessing: boolean) => void
   setError: (error: string | null) => void
@@ -26,6 +26,10 @@ export const usePatternStore = create<PatternState>((set) => ({
     colorCount: 20,
     ditherMode: 'none',
     targetSize: 150,
+    useDmcPalette: false,
+    smoothingAmount: 0.25,
+    simplifyAmount: 0.15,
+    minRegionSize: 3,
   },
   isProcessing: false,
   error: null,

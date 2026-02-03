@@ -1,7 +1,13 @@
-import type { DMCColor, LABColor, RGBColor } from '@/types'
+import type {
+  DMCColor,
+  DmcMetadata,
+  LABColor,
+  PaletteMappingEntry,
+  RGBColor,
+} from '@/types'
 import { DMC_COLORS } from './dmc-colors'
 import { deltaE76, deltaECMC, deltaE94 } from './color-distance'
-import { rgbToLab } from './color-conversion'
+import { hexToRgb, rgbToLab } from './color-conversion'
 
 /**
  * Match a LAB color to the closest DMC thread color
@@ -65,6 +71,47 @@ export function matchRGBToDMC(
   return matchToDMC(lab, excludedCodes, metric)
 }
 
+export interface DmcValuePreservingWeights {
+  wL: number
+  wC: number
+}
+
+/**
+ * Match a LAB color to DMC with extra emphasis on preserving luminance/value.
+ *
+ * Cost = wL * |ΔL| + wC * sqrt(Δa^2 + Δb^2)
+ */
+export function matchToDmcPreserveValue(
+  color: LABColor,
+  excludedCodes: string[] = [],
+  weights: DmcValuePreservingWeights = { wL: 2.0, wC: 1.0 }
+): DMCColor {
+  const palette = excludedCodes.length > 0
+    ? DMC_COLORS.filter((c) => !excludedCodes.includes(c.code))
+    : DMC_COLORS
+
+  if (palette.length === 0) {
+    throw new Error('Cannot match to DMC: palette is empty after exclusions')
+  }
+
+  let best = palette[0]
+  let bestCost = Infinity
+
+  palette.forEach((dmc) => {
+    const dL = Math.abs(color.L - dmc.lab[0])
+    const da = color.a - dmc.lab[1]
+    const db = color.b - dmc.lab[2]
+    const dC = Math.sqrt(da * da + db * db)
+    const cost = weights.wL * dL + weights.wC * dC
+    if (cost < bestCost) {
+      bestCost = cost
+      best = dmc
+    }
+  })
+
+  return best
+}
+
 /**
  * Match multiple LAB colors to DMC at once (optimized for batch processing)
  *
@@ -79,6 +126,56 @@ export function batchMatchToDMC(
   metric: 'CIE76' | 'CIE94' | 'CMC' = 'CMC'
 ): DMCColor[] {
   return colors.map((color) => matchToDMC(color, excludedCodes, metric))
+}
+
+export interface DmcPaletteMappingResult {
+  mappedPalette: string[]
+  dmcMetadataByMappedHex: Record<string, DmcMetadata>
+  mappingTable: PaletteMappingEntry[]
+  originalToMapped: Record<string, string>
+}
+
+export function mapPaletteToDmc(
+  palette: string[],
+  _metric: 'CIE76' | 'CIE94' | 'CMC' = 'CMC',
+  weights: DmcValuePreservingWeights = { wL: 2.0, wC: 1.0 }
+): DmcPaletteMappingResult {
+  const uniquePalette = Array.from(
+    new Set(palette.map((hex) => normalizeHex(hex)))
+  )
+  const dmcMetadataByMappedHex: Record<string, DmcMetadata> = {}
+  const mappingTable: PaletteMappingEntry[] = []
+  const originalToMapped: Record<string, string> = {}
+  const mappedPaletteSet = new Set<string>()
+
+  uniquePalette.forEach((originalHex) => {
+    const dmc = matchToDmcPreserveValue(rgbToLab(hexToRgb(originalHex)), [], weights)
+    const mappedHex = normalizeHex(dmc.hex)
+    const dmcMetadata: DmcMetadata = {
+      code: dmc.code,
+      name: dmc.name,
+      hex: mappedHex,
+    }
+
+    originalToMapped[originalHex] = mappedHex
+    dmcMetadataByMappedHex[mappedHex] = dmcMetadata
+    mappedPaletteSet.add(mappedHex)
+    mappingTable.push({
+      originalHex,
+      mappedHex,
+      dmc: dmcMetadata,
+    })
+  })
+
+  const mappedPalette = Array.from(mappedPaletteSet)
+  mappedPalette.sort((a, b) => rgbToLab(hexToRgb(a)).L - rgbToLab(hexToRgb(b)).L)
+
+  return {
+    mappedPalette,
+    dmcMetadataByMappedHex,
+    mappingTable,
+    originalToMapped,
+  }
 }
 
 /**
@@ -203,3 +300,7 @@ export function createReducedDMCPalette(targetCount: number): DMCColor[] {
  * Export full DMC palette for external use
  */
 export { DMC_COLORS } from './dmc-colors'
+
+function normalizeHex(hex: string): string {
+  return hex.startsWith('#') ? hex.toUpperCase() : `#${hex.toUpperCase()}`
+}
