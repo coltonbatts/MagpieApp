@@ -1,10 +1,9 @@
 import { useEffect, useRef } from 'react'
 
-const MAX_PUPIL_SHIFT = 7
+const MAX_EYE_SHIFT = 4
 
 export function MascotEyes() {
   const eyeRefs = useRef<Array<HTMLDivElement | null>>([])
-  const pupilRefs = useRef<Array<HTMLDivElement | null>>([])
 
   useEffect(() => {
     const pointer = {
@@ -26,9 +25,8 @@ export function MascotEyes() {
     const render = () => {
       frame = window.requestAnimationFrame(render)
 
-      eyeRefs.current.forEach((eye, index) => {
-        const pupil = pupilRefs.current[index]
-        if (!eye || !pupil) return
+      eyeRefs.current.forEach((eye) => {
+        if (!eye) return
 
         const rect = eye.getBoundingClientRect()
         const eyeCenterX = rect.left + rect.width / 2
@@ -37,11 +35,11 @@ export function MascotEyes() {
         const deltaX = pointer.x - eyeCenterX
         const deltaY = pointer.y - eyeCenterY
         const distance = Math.hypot(deltaX, deltaY) || 1
-        const clampedDistance = Math.min(distance, MAX_PUPIL_SHIFT)
+        const clampedDistance = Math.min(distance, MAX_EYE_SHIFT)
         const offsetX = (deltaX / distance) * clampedDistance
         const offsetY = (deltaY / distance) * clampedDistance
 
-        pupil.style.transform = `translate(${offsetX}px, ${offsetY}px)`
+        eye.style.transform = `translate(${offsetX}px, ${offsetY}px)`
       })
     }
 
@@ -57,25 +55,21 @@ export function MascotEyes() {
   }, [])
 
   return (
-    <div className="magpie-mascot" aria-hidden="true">
-      <div className="magpie-mascot__face">
+    <div className="magpie-wordmark" aria-hidden="true">
+      <div className="magpie-wordmark__eyes">
         {[0, 1].map((eyeIndex) => (
           <div
             key={eyeIndex}
-            className={`magpie-mascot__eye ${eyeIndex === 1 ? 'magpie-mascot__eye--delay' : ''}`}
+            className={`magpie-wordmark__eye ${eyeIndex === 1 ? 'magpie-wordmark__eye--delay' : ''}`}
             ref={(node) => {
               eyeRefs.current[eyeIndex] = node
             }}
           >
-            <div
-              className="magpie-mascot__pupil"
-              ref={(node) => {
-                pupilRefs.current[eyeIndex] = node
-              }}
-            />
+            <span className="magpie-wordmark__dot" />
           </div>
         ))}
       </div>
+      <span className="magpie-wordmark__text">magpie.</span>
     </div>
   )
 }

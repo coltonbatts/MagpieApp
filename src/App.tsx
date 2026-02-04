@@ -38,7 +38,14 @@ export default function App() {
   const [showDMCTester, setShowDMCTester] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [isSavingProject, setIsSavingProject] = useState(false)
+  const [showSplash, setShowSplash] = useState(true)
   const isDev = import.meta.env.DEV
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setShowSplash(false), 1200)
+    return () => window.clearTimeout(timer)
+  }, [])
+
   useEffect(() => {
     if (!isDev) return
     if (window.localStorage.getItem('magpie:runColorSanity') !== '1') return
@@ -179,9 +186,18 @@ export default function App() {
     }
   }
 
+  if (showSplash) {
+    return (
+      <div className="magpie-splash" role="status" aria-live="polite" aria-label="Loading Magpie">
+        <span className="magpie-splash__wordmark">magpie.</span>
+      </div>
+    )
+  }
+
   if (isDev && showDMCTester) {
     return (
       <div className="min-h-screen bg-gray-50">
+        <MascotEyes />
         <div className="max-w-4xl mx-auto">
           <div className="bg-white shadow-sm border-b border-gray-200 p-4 flex items-center justify-between">
             <h1 className="text-xl font-bold">MagpieApp - DMC Test Mode</h1>
@@ -199,7 +215,12 @@ export default function App() {
   }
 
   if (isHubVisible) {
-    return <HomeHub onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} />
+    return (
+      <>
+        <MascotEyes />
+        <HomeHub onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} />
+      </>
+    )
   }
 
   const renderStage = () => {
