@@ -1,7 +1,7 @@
 {
   "name": "magpie-app",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "start": "vite",
@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "test": "vitest run",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build"
+    "desktop:build": "tauri build",
+    "release:0.2.0": "bash ./scripts/release-0.2.0.sh"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.10.1",
