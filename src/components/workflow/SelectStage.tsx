@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
@@ -6,8 +6,11 @@ import { SelectionArtifactModel } from '@/model/SelectionArtifact'
 import { StudioPreview } from './StudioPreview'
 import { MaskLayer } from './MaskLayer'
 import { Button, Slider } from '@/components/ui'
+import type { CameraState } from '@/types'
+import { fitCameraToWorld, zoomAtCursor } from '@/lib/camera'
 
 export function SelectStage() {
+    const cameraDebugEnabled = import.meta.env.DEV && window.localStorage.getItem('magpie:cameraDebug') === '1'
     const {
         selectionWorkingImage,
         referenceId,
@@ -27,8 +30,24 @@ export function SelectStage() {
         referencePlacement,
         setCompositionLocked,
     } = usePatternStore()
+    const selectCamera = useUIStore((state) => state.selectCamera)
+    const setSelectCamera = useUIStore((state) => state.setSelectCamera)
     const { setWorkflowStage } = useUIStore()
     const [tool, setTool] = useState<'brush' | 'eraser' | 'magic'>('brush')
+    const worldRef = useRef<HTMLDivElement | null>(null)
+    const viewportRef = useRef<HTMLDivElement | null>(null)
+    const cameraRef = useRef<CameraState>(selectCamera)
+    const pendingCameraCommitFrameRef = useRef<number | null>(null)
+    const isPanningRef = useRef(false)
+    const panStartRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null)
+    const [spacePressed, setSpacePressed] = useState(false)
+    const [cameraVersion, setCameraVersion] = useState(0)
+    const [pointerImage, setPointerImage] = useState<{ x: number; y: number } | null>(null)
+
+    useEffect(() => {
+        // Stage 3 locks composition transforms; only camera navigation is allowed.
+        setCompositionLocked(true)
+    }, [setCompositionLocked])
 
     // Initialize selection if it doesn't exist
     useEffect(() => {
@@ -63,6 +82,158 @@ export function SelectStage() {
         }
         return () => { isMounted = false }
     }, [selectionWorkingImage, referenceId, setSelectionWorkspaceId])
+
+    const applyCamera = useCallback((nextCamera: CameraState) => {
+        cameraRef.current = nextCamera
+        const world = worldRef.current
+        if (!world) return
+        world.style.transform = `translate(${nextCamera.panX}px, ${nextCamera.panY}px) scale(${nextCamera.zoom})`
+        setCameraVersion((v) => v + 1)
+    }, [])
+
+    const commitCamera = useCallback((nextCamera: CameraState) => {
+        setSelectCamera(nextCamera)
+    }, [setSelectCamera])
+
+    const scheduleCameraCommit = useCallback((nextCamera: CameraState) => {
+        if (pendingCameraCommitFrameRef.current !== null) return
+        pendingCameraCommitFrameRef.current = window.requestAnimationFrame(() => {
+            pendingCameraCommitFrameRef.current = null
+            commitCamera(nextCamera)
+        })
+    }, [commitCamera])
+
+    const fitCamera = useCallback((manual = false) => {
+        const viewport = viewportRef.current
+        if (!viewport) return
+        const nextCamera = fitCameraToWorld(
+            {
+                ...cameraRef.current,
+                isFitted: manual || cameraRef.current.isFitted,
+            },
+            { width: viewport.clientWidth, height: viewport.clientHeight },
+            { width: viewport.clientWidth, height: viewport.clientHeight },
+            0
+        )
+        applyCamera(nextCamera)
+        commitCamera(nextCamera)
+    }, [applyCamera, commitCamera])
+
+    useEffect(() => {
+        applyCamera(selectCamera)
+    }, [applyCamera, selectCamera])
+
+    useEffect(() => {
+        const viewport = viewportRef.current
+        if (!viewport) return
+
+        if (cameraRef.current.isFitted) {
+            fitCamera(false)
+        }
+
+        const onResize = () => {
+            if (cameraRef.current.isFitted) fitCamera(false)
+        }
+        const observer = new ResizeObserver(onResize)
+        observer.observe(viewport)
+        return () => observer.disconnect()
+    }, [fitCamera])
+
+    useEffect(() => {
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.code === 'Space') setSpacePressed(true)
+            if (!viewportRef.current) return
+            if (event.key !== '+' && event.key !== '=' && event.key !== '-' && event.key !== '_') return
+            if (event.metaKey || event.ctrlKey || event.altKey) return
+            const rect = viewportRef.current.getBoundingClientRect()
+            const factor = event.key === '-' || event.key === '_' ? 0.9 : 1.1
+            const next = zoomAtCursor({
+                camera: cameraRef.current,
+                cursor: { x: rect.width / 2, y: rect.height / 2 },
+                screen: { width: rect.width, height: rect.height },
+                factor
+            })
+            applyCamera(next)
+            commitCamera(next)
+            event.preventDefault()
+        }
+        const onKeyUp = (event: KeyboardEvent) => {
+            if (event.code === 'Space') setSpacePressed(false)
+        }
+        window.addEventListener('keydown', onKeyDown)
+        window.addEventListener('keyup', onKeyUp)
+        return () => {
+            window.removeEventListener('keydown', onKeyDown)
+            window.removeEventListener('keyup', onKeyUp)
+        }
+    }, [applyCamera, commitCamera])
+
+    useEffect(() => () => {
+        if (pendingCameraCommitFrameRef.current !== null) {
+            window.cancelAnimationFrame(pendingCameraCommitFrameRef.current)
+            pendingCameraCommitFrameRef.current = null
+        }
+    }, [])
+
+    const handleWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+        const viewport = viewportRef.current
+        if (!viewport) return
+        event.preventDefault()
+        const rect = viewport.getBoundingClientRect()
+        const cursor = { x: event.clientX - rect.left, y: event.clientY - rect.top }
+        let next = cameraRef.current
+        if (event.metaKey || event.ctrlKey) {
+            next = zoomAtCursor({
+                camera: next,
+                cursor,
+                screen: { width: rect.width, height: rect.height },
+                factor: Math.exp(-event.deltaY * 0.002)
+            })
+        } else {
+            next = {
+                ...next,
+                panX: next.panX - event.deltaX,
+                panY: next.panY - event.deltaY,
+                isFitted: false,
+            }
+        }
+        applyCamera(next)
+        scheduleCameraCommit(next)
+    }, [applyCamera, scheduleCameraCommit])
+
+    const handlePanDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        if (!spacePressed || event.button !== 0) return
+        isPanningRef.current = true
+        panStartRef.current = {
+            x: event.clientX,
+            y: event.clientY,
+            panX: cameraRef.current.panX,
+            panY: cameraRef.current.panY,
+        }
+        event.currentTarget.setPointerCapture(event.pointerId)
+    }, [spacePressed])
+
+    const handlePanMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        if (!isPanningRef.current || !panStartRef.current) return
+        const next = {
+            ...cameraRef.current,
+            panX: panStartRef.current.panX + (event.clientX - panStartRef.current.x),
+            panY: panStartRef.current.panY + (event.clientY - panStartRef.current.y),
+            isFitted: false,
+        }
+        applyCamera(next)
+        scheduleCameraCommit(next)
+    }, [applyCamera, scheduleCameraCommit])
+
+    const handlePanUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+        if (!isPanningRef.current) return
+        isPanningRef.current = false
+        panStartRef.current = null
+        if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId)
+        }
+        commitCamera(cameraRef.current)
+    }, [commitCamera])
 
     const handleCommit = (finalMask: Uint8Array) => {
         if (!selection) return
@@ -288,23 +459,64 @@ export function SelectStage() {
                 </div>
             </div>
 
-            {/* Main View: Studio Preview with Alignment Persistence */}
-            <div className="flex-1 bg-surface-2 relative flex items-center justify-center p-12 overflow-hidden shadow-inner">
+            {/* Main View: Studio Preview with camera-only navigation */}
+            <div
+                ref={viewportRef}
+                className="flex-1 bg-surface-2 relative flex items-center justify-center p-12 overflow-hidden shadow-inner"
+                onWheel={handleWheel}
+                onContextMenu={(event) => event.preventDefault()}
+            >
+                <div ref={worldRef} className="absolute inset-0 transform-gpu">
                     <StudioPreview fabricSetup={fabricSetup}>
-                    <MaskLayer
-                        image={selectionWorkingImage}
-                        mask={selection.mask}
-                        placement={referencePlacement}
-                        config={maskConfig}
-                        tool={tool}
-                        magicWandConfig={magicWandConfig}
-                        selectionWorkspaceId={selectionWorkspaceId}
-                        selectionMode={selectionMode}
-                        fabricColor={fabricSetup.color}
-                        onMaskChange={() => { }} // Store update deferred to commit for performance
-                        onCommit={(finalMask) => handleCommit(finalMask)}
-                    />
-                </StudioPreview>
+                        <MaskLayer
+                            image={selectionWorkingImage}
+                            mask={selection.mask}
+                            placement={referencePlacement}
+                            config={maskConfig}
+                            tool={tool}
+                            magicWandConfig={magicWandConfig}
+                            selectionWorkspaceId={selectionWorkspaceId}
+                            selectionMode={selectionMode}
+                            fabricColor={fabricSetup.color}
+                            onMaskChange={() => { }} // Store update deferred to commit for performance
+                            onCommit={(finalMask) => handleCommit(finalMask)}
+                            onPointerSample={(sample) => setPointerImage(sample)}
+                        />
+                    </StudioPreview>
+                </div>
+
+                <div
+                    className={`absolute inset-0 z-20 touch-none ${spacePressed || isPanningRef.current ? 'cursor-grab pointer-events-auto' : 'pointer-events-none'}`}
+                    onPointerDown={handlePanDown}
+                    onPointerMove={handlePanMove}
+                    onPointerUp={handlePanUp}
+                    onPointerCancel={handlePanUp}
+                />
+
+                <div className="absolute right-8 top-8 z-30 flex items-center gap-2 rounded-lg border border-border bg-overlay/95 p-1 shadow-sm backdrop-blur">
+                    <Button type="button" size="sm" variant="secondary" className="min-w-14" onClick={() => fitCamera(true)}>
+                        Fit
+                    </Button>
+                    <Button
+                        type="button"
+                        size="sm"
+                        variant="secondary"
+                        className="min-w-14"
+                        onClick={() => {
+                            const next = {
+                                ...cameraRef.current,
+                                zoom: 1,
+                                panX: 0,
+                                panY: 0,
+                                isFitted: false,
+                            }
+                            applyCamera(next)
+                            commitCamera(next)
+                        }}
+                    >
+                        100%
+                    </Button>
+                </div>
 
                 {/* Footnote */}
                 <div className="absolute bottom-12 right-12 px-4 py-2 bg-white/50 backdrop-blur-md rounded-lg border border-white/20 pointer-events-none">
@@ -312,6 +524,11 @@ export function SelectStage() {
                         Assembly Mode: Selection
                     </span>
                 </div>
+                {cameraDebugEnabled && (
+                    <pre className="pointer-events-none absolute left-8 top-8 z-30 whitespace-pre rounded-md border border-border bg-overlay/95 px-3 py-2 font-mono text-[11px] leading-4 text-fg-muted shadow-sm">
+                        {`zoom: ${cameraRef.current.zoom.toFixed(3)}\npan: ${cameraRef.current.panX.toFixed(1)}, ${cameraRef.current.panY.toFixed(1)}\nimage: ${pointerImage ? `${pointerImage.x}, ${pointerImage.y}` : 'n/a'}\nrev: ${cameraVersion}`}
+                    </pre>
+                )}
             </div>
         </div>
     )

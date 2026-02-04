@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type * as PIXINamespace from 'pixi.js'
-import type { Viewport } from 'pixi-viewport'
 import { Pattern } from '@/model/Pattern'
-import { BuildArtifact, ManualStitchEdit, SelectionArtifact, ProcessingConfig } from '@/types'
+import { BuildArtifact, ManualStitchEdit, SelectionArtifact, ProcessingConfig, CameraState } from '@/types'
 import { VIEWER } from '@/lib/constants'
-import { createViewport, fitViewportToWorld, setViewportInteractionEnabled } from './viewport-config'
+import { fitCameraToWorld, screenToWorld, zoomAtCursor } from '@/lib/camera'
 import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
 import { linearRgbToOkLab, okLabDistanceSqWeighted } from '@/processing/color-spaces'
@@ -52,7 +51,8 @@ export function PatternViewer({
   onSelectedPaintValueChange,
 }: PatternViewerProps) {
   const { workflowStage } = useUIStore()
-  const compositionLocked = usePatternStore((state) => state.compositionLocked)
+  const viewerCamera = useUIStore((state) => state.viewerCamera)
+  const setViewerCamera = useUIStore((state) => state.setViewerCamera)
   const buildArtifact = usePatternStore((state) => state.buildArtifact)
   const hoverRegionId = usePatternStore((state) => state.hoverRegionId)
   const activeRegionId = usePatternStore((state) => state.activeRegionId)
@@ -60,8 +60,7 @@ export function PatternViewer({
   const setHoverRegionId = usePatternStore((state) => state.setHoverRegionId)
   const setActiveRegionId = usePatternStore((state) => state.setActiveRegionId)
   const toggleRegionDone = usePatternStore((state) => state.toggleRegionDone)
-  const stageAllowsCompositionEditing = workflowStage === 'Reference' || workflowStage === 'Select'
-  const compositionInteractionEnabled = !compositionLocked && stageAllowsCompositionEditing
+  const cameraInteractionEnabled = workflowStage === 'Build' || workflowStage === 'Export' || workflowStage === 'Select'
 
   // Local fallbacks if not controlled
   const [internalActiveTab, setInternalActiveTab] = useState<'finished' | 'pattern'>('finished')
@@ -124,20 +123,26 @@ export function PatternViewer({
   // 5) Confirm stitch colors match legend swatches and do not shift with zoom/DPR.
   const containerRef = useRef<HTMLDivElement>(null)
   const appRef = useRef<PIXINamespace.Application | null>(null)
-  const viewportRef = useRef<Viewport | null>(null)
+  const worldContainerRef = useRef<PIXINamespace.Container | null>(null)
   const pixiRef = useRef<typeof PIXINamespace | null>(null)
   const processingConfig = usePatternStore((state) => state.processingConfig)
   const applyManualEdits = usePatternStore((state) => state.applyManualEdits)
   const clearManualEdits = usePatternStore((state) => state.clearManualEdits)
   const worldSizeRef = useRef({ width: 1, height: 1 })
-  const hasUserTransformedViewportRef = useRef(false)
+  const cameraRef = useRef<CameraState>(viewerCamera)
+  const [cameraDebugText, setCameraDebugText] = useState('')
+  const [pointerDebugText, setPointerDebugText] = useState('')
+  const pendingCameraCommitFrameRef = useRef<number | null>(null)
+  const isPanningRef = useRef(false)
+  const panStartRef = useRef<{ x: number; y: number; panX: number; panY: number } | null>(null)
+  const panPointerIdRef = useRef<number | null>(null)
+  const spacePressedRef = useRef(false)
   const pendingEditFrameRef = useRef<number | null>(null)
   const pendingStrokeEditsRef = useRef<Map<string, ManualStitchEdit>>(new Map())
   const isEditingStrokeRef = useRef(false)
   const lastEditedCellRef = useRef<string | null>(null)
   const [viewerError, setViewerError] = useState<string | null>(null)
   const [isReady, setIsReady] = useState(false)
-  const [debugText, setDebugText] = useState('')
 
   const [internalEditModeEnabled, setInternalEditModeEnabled] = useState(false)
   const editModeEnabled = controlledEditModeEnabled ?? internalEditModeEnabled
@@ -161,6 +166,7 @@ export function PatternViewer({
   }
 
   const isDev = import.meta.env.DEV
+  const cameraDebugEnabled = isDev && window.localStorage.getItem('magpie:cameraDebug') === '1'
   const fabricIndices = useMemo(
     () => (pattern ? getFabricIndices(pattern, processingConfig) : new Set<number>()),
     [pattern, processingConfig]
@@ -221,54 +227,95 @@ export function PatternViewer({
     }
   }, [activeRegionId, buildArtifact, hoverRegionId, setActiveRegionId, setHoverRegionId])
 
+  const updateDebugText = useCallback((pointer?: { screenX: number; screenY: number }) => {
+    if (!cameraDebugEnabled) return
+    const camera = cameraRef.current
+    const selectionMask = pattern?.selection?.mask
+    const selectionSelected = selectionMask ? countSelected(selectionMask) : -1
+    const selectionTotal = selectionMask ? selectionMask.length : -1
+    const stitchedCount = pattern ? pattern.stitches.reduce((acc, stitch) => acc + (stitch.dmcCode !== 'Fabric' ? 1 : 0), 0) : -1
+    const totalStitches = pattern ? pattern.stitches.length : -1
+    const worldCenter = {
+      x: (camera.panX * -1 + (containerRef.current?.clientWidth ?? 0) / 2) / Math.max(camera.zoom, 0.0001),
+      y: (camera.panY * -1 + (containerRef.current?.clientHeight ?? 0) / 2) / Math.max(camera.zoom, 0.0001),
+    }
+    setCameraDebugText(
+      [
+        `selPx: ${selectionSelected >= 0 ? selectionSelected : 'none'} / ${selectionTotal >= 0 ? selectionTotal : 'none'}`,
+        `stitches: ${stitchedCount >= 0 ? stitchedCount : 'none'} / ${totalStitches >= 0 ? totalStitches : 'none'}`,
+        `zoom: ${camera.zoom.toFixed(4)}`,
+        `pan: ${camera.panX.toFixed(2)}, ${camera.panY.toFixed(2)}`,
+        `center: ${worldCenter.x.toFixed(2)}, ${worldCenter.y.toFixed(2)}`,
+        `world: ${worldSizeRef.current.width} x ${worldSizeRef.current.height}`,
+      ].join('\n')
+    )
+    if (!pointer || !pattern) {
+      setPointerDebugText('')
+      return
+    }
+    const world = screenToWorld(camera, { x: pointer.screenX, y: pointer.screenY })
+    setPointerDebugText(
+      `pointer world: ${world.x.toFixed(2)}, ${world.y.toFixed(2)}\npointer image: ${Math.floor(world.x / VIEWER.CELL_SIZE)}, ${Math.floor(world.y / VIEWER.CELL_SIZE)}`
+    )
+  }, [cameraDebugEnabled, pattern])
+
+  const applyCameraToWorld = useCallback((nextCamera: CameraState) => {
+    cameraRef.current = nextCamera
+    const worldContainer = worldContainerRef.current
+    if (!worldContainer) return
+    worldContainer.scale.set(nextCamera.zoom)
+    worldContainer.position.set(nextCamera.panX, nextCamera.panY)
+    updateDebugText()
+  }, [updateDebugText])
+
+  const commitCamera = useCallback((nextCamera: CameraState) => {
+    setViewerCamera(nextCamera)
+  }, [setViewerCamera])
+
+  const scheduleCameraCommit = useCallback((nextCamera: CameraState) => {
+    if (pendingCameraCommitFrameRef.current !== null) return
+    pendingCameraCommitFrameRef.current = window.requestAnimationFrame(() => {
+      pendingCameraCommitFrameRef.current = null
+      commitCamera(nextCamera)
+    })
+  }, [commitCamera])
+
+  const fitCameraNow = useCallback((isManualRequest: boolean) => {
+    const host = containerRef.current
+    if (!host) return
+    const nextCamera = fitCameraToWorld(
+      {
+        ...cameraRef.current,
+        isFitted: isManualRequest || cameraRef.current.isFitted,
+      },
+      { width: host.clientWidth || window.innerWidth, height: host.clientHeight || window.innerHeight },
+      { width: worldSizeRef.current.width, height: worldSizeRef.current.height },
+      12
+    )
+    applyCameraToWorld(nextCamera)
+    commitCamera(nextCamera)
+  }, [applyCameraToWorld, commitCamera])
+
   useEffect(() => {
     const container = containerRef.current
     if (!container) return
 
     let canceled = false
     let resizeObserver: ResizeObserver | null = null
-    const updateDebugText = () => {
-      if (!isDev) return
-      const viewport = viewportRef.current
-      if (!viewport) return
-
-      const center = viewport.center
-      const selectionMask = pattern?.selection?.mask
-      const selectionSelected = selectionMask ? countSelected(selectionMask) : -1
-      const selectionTotal = selectionMask ? selectionMask.length : -1
-      const stitchedCount = pattern ? pattern.stitches.reduce((acc, stitch) => acc + (stitch.dmcCode !== 'Fabric' ? 1 : 0), 0) : -1
-      const totalStitches = pattern ? pattern.stitches.length : -1
-      setDebugText(
-        [
-          `selPx: ${selectionSelected >= 0 ? selectionSelected : 'none'} / ${selectionTotal >= 0 ? selectionTotal : 'none'}`,
-          `stitches: ${stitchedCount >= 0 ? stitchedCount : 'none'} / ${totalStitches >= 0 ? totalStitches : 'none'}`,
-          `scale: ${viewport.scale.x.toFixed(4)} x ${viewport.scale.y.toFixed(4)}`,
-          `center: ${center.x.toFixed(2)}, ${center.y.toFixed(2)}`,
-          `world: ${viewport.worldWidth} x ${viewport.worldHeight}`,
-          `refId: ${pattern?.referenceId || 'none'}`,
-          `selId: ${pattern?.selection?.id || 'none'}`,
-        ].join('\n')
-      )
-    }
 
     const handleResize = () => {
       const app = appRef.current
-      const viewport = viewportRef.current
       const host = containerRef.current
-      if (!app || !viewport || !host) return
+      if (!app || !host) return
 
       const width = host.clientWidth || window.innerWidth
       const height = host.clientHeight || window.innerHeight
       app.renderer.resize(width, height)
-
-      const { width: worldWidth, height: worldHeight } = worldSizeRef.current
-      viewport.resize(width, height, worldWidth, worldHeight)
-
-      if (!hasUserTransformedViewportRef.current) {
-        fitViewportToWorld(viewport, worldWidth, worldHeight)
+      if (cameraRef.current.isFitted) {
+        fitCameraNow(false)
+      } else {
+        updateDebugText()
       }
-
-      updateDebugText()
     }
 
     import('pixi.js')
@@ -289,33 +336,17 @@ export function PatternViewer({
         if (canceled || !containerRef.current) return
 
         // Viewer lifecycle:
-        // 1) Create App + Viewport once.
-        // 2) Render pattern into viewport when data changes.
+        // 1) Create App + world container once.
+        // 2) Render pattern into world container when data changes.
         // 3) Re-fit on first pattern render and on container resize.
-        const viewport = createViewport(
-          app,
-          worldSizeRef.current.width,
-          worldSizeRef.current.height,
-          container.clientWidth || window.innerWidth,
-          container.clientHeight || window.innerHeight
-        )
-        setViewportInteractionEnabled(viewport, compositionInteractionEnabled)
-        const markUserTransformed = (event?: { type?: string }) => {
-          const type = event?.type
-          if (type === 'drag' || type === 'wheel' || type === 'pinch') {
-            hasUserTransformedViewportRef.current = true
-          }
-          updateDebugText()
-        }
-
-        viewport.on('moved', markUserTransformed)
-        viewport.on('zoomed', markUserTransformed)
-        app.stage.addChild(viewport)
+        const worldContainer = new PIXI.Container()
+        app.stage.addChild(worldContainer)
 
         pixiRef.current = PIXI
-        viewportRef.current = viewport
+        worldContainerRef.current = worldContainer
         containerRef.current.appendChild(app.canvas)
         appRef.current = app
+        applyCameraToWorld(cameraRef.current)
         setIsReady(true)
         updateDebugText()
 
@@ -332,39 +363,32 @@ export function PatternViewer({
       resizeObserver?.disconnect()
       appRef.current?.destroy(true, { children: true, texture: true })
       appRef.current = null
-      viewportRef.current = null
+      worldContainerRef.current = null
       pixiRef.current = null
       worldSizeRef.current = { width: 1, height: 1 }
-      hasUserTransformedViewportRef.current = false
       setIsReady(false)
-      setDebugText('')
+      setCameraDebugText('')
+      setPointerDebugText('')
     }
-  }, [isDev])
-
-  useEffect(() => {
-    const viewport = viewportRef.current
-    if (!viewport) return
-    setViewportInteractionEnabled(viewport, compositionInteractionEnabled)
-  }, [compositionInteractionEnabled])
+  }, [applyCameraToWorld, fitCameraNow, isDev, updateDebugText])
 
   const handleFitToView = () => {
-    if (!viewportRef.current || !pattern || !compositionInteractionEnabled) return
-    fitViewportToWorld(
-      viewportRef.current,
-      worldSizeRef.current.width,
-      worldSizeRef.current.height
-    )
-    hasUserTransformedViewportRef.current = false
-    if (isDev) {
-      const center = viewportRef.current.center
-      setDebugText(
-        [
-          `scale: ${viewportRef.current.scale.x.toFixed(4)} x ${viewportRef.current.scale.y.toFixed(4)}`,
-          `center: ${center.x.toFixed(2)}, ${center.y.toFixed(2)}`,
-          `world: ${viewportRef.current.worldWidth} x ${viewportRef.current.worldHeight}`,
-        ].join('\n')
-      )
+    if (!pattern || !cameraInteractionEnabled) return
+    fitCameraNow(true)
+  }
+
+  const handleResetZoom = () => {
+    const host = containerRef.current
+    if (!host) return
+    const nextCamera: CameraState = {
+      ...cameraRef.current,
+      zoom: 1,
+      panX: (host.clientWidth - worldSizeRef.current.width) / 2,
+      panY: (host.clientHeight - worldSizeRef.current.height) / 2,
+      isFitted: false,
     }
+    applyCameraToWorld(nextCamera)
+    commitCamera(nextCamera)
   }
 
   const flushPendingManualEdits = useCallback(() => {
@@ -384,14 +408,15 @@ export function PatternViewer({
   }, [flushPendingManualEdits])
 
   const buildEditFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>): ManualStitchEdit | null => {
-    if (!pattern || !viewportRef.current) return null
+    if (!pattern) return null
     const selectedPaint = paintOptions.find((option) => option.id === selectedPaintValue)
     if (editTool === 'paint' && !selectedPaint) return null
 
     const bounds = event.currentTarget.getBoundingClientRect()
     const screenX = event.clientX - bounds.left
     const screenY = event.clientY - bounds.top
-    const world = viewportRef.current.toWorld(screenX, screenY)
+    const world = screenToWorld(cameraRef.current, { x: screenX, y: screenY })
+    updateDebugText({ screenX, screenY })
     const x = Math.floor(world.x / VIEWER.CELL_SIZE)
     const y = Math.floor(world.y / VIEWER.CELL_SIZE)
 
@@ -408,7 +433,7 @@ export function PatternViewer({
       y,
       ...selectedPaint!.edit,
     }
-  }, [editTool, paintOptions, pattern, selectedPaintValue])
+  }, [editTool, paintOptions, pattern, selectedPaintValue, updateDebugText])
 
   const queueEditFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     const edit = buildEditFromPointer(event)
@@ -422,17 +447,30 @@ export function PatternViewer({
   }, [buildEditFromPointer, schedulePendingEditFlush])
 
   const handleEditPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (shouldStartPan(event)) {
+      startPan(event)
+      return
+    }
+    if (event.button !== 0) return
     isEditingStrokeRef.current = true
     queueEditFromPointer(event)
     event.currentTarget.setPointerCapture(event.pointerId)
-  }, [queueEditFromPointer])
+  }, [queueEditFromPointer, shouldStartPan, startPan])
 
   const handleEditPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (isPanningRef.current) {
+      updatePan(event)
+      return
+    }
     if (!isEditingStrokeRef.current) return
     queueEditFromPointer(event)
-  }, [queueEditFromPointer])
+  }, [queueEditFromPointer, updatePan])
 
   const endEditStroke = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (isPanningRef.current) {
+      endPan(event)
+      return
+    }
     if (!isEditingStrokeRef.current) return
     isEditingStrokeRef.current = false
     lastEditedCellRef.current = null
@@ -444,27 +482,32 @@ export function PatternViewer({
       pendingEditFrameRef.current = null
     }
     flushPendingManualEdits()
-  }, [flushPendingManualEdits])
+  }, [endPan, flushPendingManualEdits])
 
   const getRegionIdFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>): number | null => {
-    if (!buildArtifact || !viewportRef.current) return null
+    if (!buildArtifact) return null
     const bounds = event.currentTarget.getBoundingClientRect()
     const screenX = event.clientX - bounds.left
     const screenY = event.clientY - bounds.top
-    const world = viewportRef.current.toWorld(screenX, screenY)
+    const world = screenToWorld(cameraRef.current, { x: screenX, y: screenY })
+    updateDebugText({ screenX, screenY })
     const x = Math.floor(world.x / VIEWER.CELL_SIZE)
     const y = Math.floor(world.y / VIEWER.CELL_SIZE)
     if (x < 0 || y < 0 || x >= buildArtifact.width || y >= buildArtifact.height) return null
     const regionId = buildArtifact.pixelRegionId[y * buildArtifact.width + x]
     return regionId > 0 ? regionId : null
-  }, [buildArtifact])
+  }, [buildArtifact, updateDebugText])
 
   const handleRegionPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (isPanningRef.current) {
+      updatePan(event)
+      return
+    }
     const nextRegionId = getRegionIdFromPointer(event)
     if (nextRegionId !== hoverRegionId) {
       setHoverRegionId(nextRegionId)
     }
-  }, [getRegionIdFromPointer, hoverRegionId, setHoverRegionId])
+  }, [getRegionIdFromPointer, hoverRegionId, setHoverRegionId, updatePan])
 
   const handleRegionPointerLeave = useCallback(() => {
     if (hoverRegionId !== null) {
@@ -473,6 +516,10 @@ export function PatternViewer({
   }, [hoverRegionId, setHoverRegionId])
 
   const handleRegionPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (shouldStartPan(event)) {
+      startPan(event)
+      return
+    }
     const regionId = getRegionIdFromPointer(event)
     if (regionId === null) {
       setActiveRegionId(null)
@@ -482,42 +529,162 @@ export function PatternViewer({
     if (event.detail >= 2) {
       toggleRegionDone(regionId)
     }
-  }, [getRegionIdFromPointer, setActiveRegionId, toggleRegionDone])
+  }, [getRegionIdFromPointer, setActiveRegionId, shouldStartPan, startPan, toggleRegionDone])
+
+  function shouldStartPan(event: React.PointerEvent<HTMLDivElement>): boolean {
+    const isMiddleOrRight = event.button === 1 || event.button === 2
+    const isSpacePan = spacePressedRef.current && event.button === 0
+    return isMiddleOrRight || isSpacePan
+  }
+
+  function startPan(event: React.PointerEvent<HTMLDivElement>): boolean {
+    if (!cameraInteractionEnabled) return false
+    isPanningRef.current = true
+    panPointerIdRef.current = event.pointerId
+    panStartRef.current = {
+      x: event.clientX,
+      y: event.clientY,
+      panX: cameraRef.current.panX,
+      panY: cameraRef.current.panY,
+    }
+    event.currentTarget.setPointerCapture(event.pointerId)
+    return true
+  }
+
+  function updatePan(event: React.PointerEvent<HTMLDivElement>): void {
+    if (!isPanningRef.current || panPointerIdRef.current !== event.pointerId || !panStartRef.current) return
+    const nextCamera: CameraState = {
+      ...cameraRef.current,
+      panX: panStartRef.current.panX + (event.clientX - panStartRef.current.x),
+      panY: panStartRef.current.panY + (event.clientY - panStartRef.current.y),
+      isFitted: false,
+    }
+    applyCameraToWorld(nextCamera)
+    scheduleCameraCommit(nextCamera)
+    const bounds = event.currentTarget.getBoundingClientRect()
+    updateDebugText({ screenX: event.clientX - bounds.left, screenY: event.clientY - bounds.top })
+  }
+
+  function endPan(event: React.PointerEvent<HTMLDivElement>): void {
+    if (!isPanningRef.current || panPointerIdRef.current !== event.pointerId) return
+    isPanningRef.current = false
+    panPointerIdRef.current = null
+    panStartRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    commitCamera(cameraRef.current)
+  }
+
+  const handleCameraWheel = useCallback((event: React.WheelEvent<HTMLDivElement>) => {
+    if (!cameraInteractionEnabled) return
+    event.preventDefault()
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const screen = {
+      x: event.clientX - bounds.left,
+      y: event.clientY - bounds.top,
+    }
+    let nextCamera = cameraRef.current
+    if (event.metaKey || event.ctrlKey) {
+      const factor = Math.exp(-event.deltaY * 0.002)
+      nextCamera = zoomAtCursor({
+        camera: nextCamera,
+        cursor: screen,
+        screen: { width: bounds.width, height: bounds.height },
+        factor,
+      })
+    } else {
+      nextCamera = {
+        ...nextCamera,
+        panX: nextCamera.panX - event.deltaX,
+        panY: nextCamera.panY - event.deltaY,
+        isFitted: false,
+      }
+    }
+    applyCameraToWorld(nextCamera)
+    scheduleCameraCommit(nextCamera)
+    updateDebugText({ screenX: screen.x, screenY: screen.y })
+  }, [applyCameraToWorld, cameraInteractionEnabled, scheduleCameraCommit, updateDebugText])
+
+  const handleNavPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!shouldStartPan(event)) return
+    startPan(event)
+  }, [])
+
+  const handleNavPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    updatePan(event)
+  }, [])
+
+  const handleNavPointerUp = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    endPan(event)
+  }, [])
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        spacePressedRef.current = true
+      }
       if (e.key === 'Escape') {
         setHighlightColorKey(null)
       }
+      if (!cameraInteractionEnabled) return
+      if (e.key !== '+' && e.key !== '=' && e.key !== '-' && e.key !== '_') return
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const host = containerRef.current
+      if (!host) return
+      const rect = host.getBoundingClientRect()
+      const center = { x: rect.width / 2, y: rect.height / 2 }
+      const factor = e.key === '-' || e.key === '_' ? 0.9 : 1.1
+      const nextCamera = zoomAtCursor({
+        camera: cameraRef.current,
+        cursor: center,
+        screen: { width: rect.width, height: rect.height },
+        factor,
+      })
+      applyCameraToWorld(nextCamera)
+      commitCamera(nextCamera)
+      e.preventDefault()
+    }
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        spacePressedRef.current = false
+      }
     }
     window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [setHighlightColorKey])
+    window.addEventListener('keyup', handleKeyUp)
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown)
+      window.removeEventListener('keyup', handleKeyUp)
+    }
+  }, [applyCameraToWorld, cameraInteractionEnabled, commitCamera, setHighlightColorKey])
 
   useEffect(() => () => {
     if (pendingEditFrameRef.current !== null) {
       window.cancelAnimationFrame(pendingEditFrameRef.current)
       pendingEditFrameRef.current = null
     }
+    if (pendingCameraCommitFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingCameraCommitFrameRef.current)
+      pendingCameraCommitFrameRef.current = null
+    }
     pendingStrokeEditsRef.current.clear()
   }, [])
 
   useEffect(() => {
+    cameraRef.current = viewerCamera
+    applyCameraToWorld(viewerCamera)
+  }, [applyCameraToWorld, viewerCamera])
+
+  useEffect(() => {
     if (!isReady) return
-    if (!appRef.current || !containerRef.current || !pixiRef.current || !viewportRef.current) {
+    if (!appRef.current || !containerRef.current || !pixiRef.current || !worldContainerRef.current) {
       return
     }
 
     if (!pattern) {
-      viewportRef.current.removeChildren()
+      worldContainerRef.current.removeChildren()
       worldSizeRef.current = { width: 1, height: 1 }
-      viewportRef.current.resize(
-        appRef.current.renderer.width,
-        appRef.current.renderer.height,
-        worldSizeRef.current.width,
-        worldSizeRef.current.height
-      )
-      hasUserTransformedViewportRef.current = false
+      fitCameraNow(false)
       return
     }
 
@@ -527,8 +694,8 @@ export function PatternViewer({
       worldSizeRef.current.width !== worldWidth || worldSizeRef.current.height !== worldHeight
     worldSizeRef.current = { width: worldWidth, height: worldHeight }
 
-    viewportRef.current.removeChildren()
-    renderPattern(pixiRef.current, viewportRef.current, pattern, {
+    worldContainerRef.current.removeChildren()
+    renderPattern(pixiRef.current, worldContainerRef.current, pattern, {
       activeTab,
       showStitchedOnly,
       showGrid,
@@ -547,11 +714,14 @@ export function PatternViewer({
     if (isEditingStrokeRef.current) {
       incrementDevCounter('pixiRedrawsDuringDrag')
     }
-    if (worldSizeChanged || !hasUserTransformedViewportRef.current) {
-      fitViewportToWorld(viewportRef.current, worldWidth, worldHeight)
-      hasUserTransformedViewportRef.current = false
+    if (worldSizeChanged && cameraRef.current.isFitted) {
+      fitCameraNow(false)
+    } else {
+      applyCameraToWorld(cameraRef.current)
+      updateDebugText()
     }
   }, [
+    applyCameraToWorld,
     isReady,
     pattern,
     activeTab,
@@ -566,11 +736,13 @@ export function PatternViewer({
     highlightColorKey,
     activeRegionId,
     doneRegionIds,
+    fitCameraNow,
     setHighlightColorKey,
+    updateDebugText,
   ])
 
   useEffect(() => {
-    if (!isReady || !pixiRef.current || !viewportRef.current || !buildArtifact) return
+    if (!isReady || !pixiRef.current || !worldContainerRef.current || !buildArtifact) return
     if (workflowStage !== 'Build' || activeTab !== 'pattern' || viewMode !== 'Regions') return
     if (!hoverRegionId) return
 
@@ -594,7 +766,7 @@ export function PatternViewer({
     overlay.setStrokeStyle({ width: 2.2, color: 0x111827, alpha: 0.95 })
     overlay.stroke()
     overlay.label = 'hover-overlay'
-    viewportRef.current.addChild(overlay)
+    worldContainerRef.current.addChild(overlay)
 
     return () => {
       overlay.destroy()
@@ -610,7 +782,11 @@ export function PatternViewer({
   }
 
   return (
-    <div className="relative h-full w-full">
+    <div
+      className="relative h-full w-full"
+      onWheel={handleCameraWheel}
+      onContextMenu={(event) => event.preventDefault()}
+    >
       <div
         ref={containerRef}
         className="h-full w-full"
@@ -665,9 +841,9 @@ export function PatternViewer({
         </div>
       )}
 
-      {compositionInteractionEnabled && (
+      {cameraInteractionEnabled && (
         <div className="absolute right-4 top-4 z-10">
-          <div className="rounded-lg border border-border bg-overlay/95 p-1 shadow-sm backdrop-blur">
+          <div className="flex items-center gap-1 rounded-lg border border-border bg-overlay/95 p-1 shadow-sm backdrop-blur">
             <Button
               type="button"
               onClick={handleFitToView}
@@ -677,6 +853,16 @@ export function PatternViewer({
               className="min-w-14"
             >
               Fit
+            </Button>
+            <Button
+              type="button"
+              onClick={handleResetZoom}
+              disabled={!pattern}
+              size="sm"
+              variant="secondary"
+              className="min-w-14"
+            >
+              100%
             </Button>
           </div>
         </div>
@@ -748,6 +934,15 @@ export function PatternViewer({
           onPointerLeave={endEditStroke}
         />
       )}
+      {cameraInteractionEnabled && (
+        <div
+          className={`absolute inset-0 z-[3] touch-none ${(spacePressedRef.current || isPanningRef.current) ? 'pointer-events-auto cursor-grab' : 'pointer-events-none'}`}
+          onPointerDown={handleNavPointerDown}
+          onPointerMove={handleNavPointerMove}
+          onPointerUp={handleNavPointerUp}
+          onPointerCancel={handleNavPointerUp}
+        />
+      )}
       {workflowStage === 'Build' &&
         activeTab === 'pattern' &&
         viewMode === 'Regions' &&
@@ -757,13 +952,18 @@ export function PatternViewer({
             className="absolute inset-0 z-[4] touch-none"
             onPointerMove={handleRegionPointerMove}
             onPointerDown={handleRegionPointerDown}
+            onPointerUp={handleNavPointerUp}
             onPointerLeave={handleRegionPointerLeave}
-            onPointerCancel={handleRegionPointerLeave}
+            onPointerCancel={(event) => {
+              handleRegionPointerLeave()
+              handleNavPointerUp(event)
+            }}
           />
         )}
-      {isDev && debugText && (
+      {cameraDebugEnabled && cameraDebugText && (
         <pre className="pointer-events-none absolute top-14 left-4 z-10 whitespace-pre rounded-md border border-border bg-overlay/95 px-3 py-2 font-mono text-[11px] leading-4 text-fg-muted shadow-sm">
-          {debugText}
+          {cameraDebugText}
+          {pointerDebugText ? `\n${pointerDebugText}` : ''}
         </pre>
       )}
       {!pattern && (
@@ -803,7 +1003,7 @@ interface RenderOptions {
 
 function renderPattern(
   PIXI: typeof PIXINamespace,
-  viewport: Viewport,
+  viewport: PIXINamespace.Container,
   pattern: Pattern,
   options: RenderOptions
 ) {
@@ -838,7 +1038,7 @@ function renderPattern(
 
 function renderRegionView(
   PIXI: typeof PIXINamespace,
-  viewport: Viewport,
+  viewport: PIXINamespace.Container,
   pattern: Pattern,
   options: RenderOptions
 ) {
@@ -931,7 +1131,7 @@ function renderRegionView(
 
 function renderFinishedPreview(
   PIXI: typeof PIXINamespace,
-  viewport: Viewport,
+  viewport: PIXINamespace.Container,
   pattern: Pattern,
   options: RenderOptions,
   fabricIndices: Set<number>
@@ -983,7 +1183,7 @@ function renderFinishedPreview(
 
 function renderPatternPreview(
   PIXI: typeof PIXINamespace,
-  viewport: Viewport,
+  viewport: PIXINamespace.Container,
   pattern: Pattern,
   options: RenderOptions
 ) {

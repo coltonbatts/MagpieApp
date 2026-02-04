@@ -8,7 +8,7 @@ import { fitImageInHoop } from '@/lib/hoop-layout'
 import type { ReferencePlacement } from '@/types'
 
 export function ReferenceStage() {
-  const { originalImage, fabricSetup, referencePlacement, compositionLocked, setReferencePlacement } = usePatternStore()
+  const { originalImage, fabricSetup, referencePlacement, compositionLocked, setReferencePlacement, setCompositionLocked } = usePatternStore()
   const { setWorkflowStage } = useUIStore()
   const canEditComposition = !compositionLocked
 
@@ -30,6 +30,11 @@ export function ReferenceStage() {
   // Drag state for image positioning
   const [isDragging, setIsDragging] = useState(false)
   const [dragStart, setDragStart] = useState<{ x: number, y: number, placement: ReferencePlacement } | null>(null)
+
+  useEffect(() => {
+    // Stage 2 is the only stage where composition transforms are editable.
+    setCompositionLocked(false)
+  }, [setCompositionLocked])
 
   useEffect(() => {
     if (originalImage && originalImage !== lastImageRef) {

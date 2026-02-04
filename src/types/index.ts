@@ -79,6 +79,15 @@ export interface ViewerConfig {
   zoomMax: number
 }
 
+export interface CameraState {
+  zoom: number
+  panX: number
+  panY: number
+  minZoom: number
+  maxZoom: number
+  isFitted: boolean
+}
+
 export interface ExportOptions {
   format: 'pdf' | 'png-clean' | 'png-marked' | 'svg'
   pageSize?: 'A4' | 'A3' | 'Letter'

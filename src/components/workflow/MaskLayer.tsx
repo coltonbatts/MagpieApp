@@ -14,6 +14,7 @@ interface MaskLayerProps {
     fabricColor?: RGBColor
     onMaskChange: (newMask: Uint8Array) => void
     onCommit: (newMask: Uint8Array) => void
+    onPointerSample?: (sample: { x: number; y: number }) => void
 }
 
 /**
@@ -33,7 +34,8 @@ export function MaskLayer({
     selectionMode = 'replace',
     fabricColor = { r: 245, g: 245, b: 220 }, // Default light linen
     onMaskChange,
-    onCommit
+    onCommit,
+    onPointerSample
 }: MaskLayerProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null)
     const maskCopyRef = useRef<Uint8Array>(new Uint8Array(mask))
@@ -195,6 +197,10 @@ export function MaskLayer({
 
         const x = (e.clientX - rect.left) * scaleX
         const y = (e.clientY - rect.top) * scaleY
+        onPointerSample?.({
+            x: Math.floor(x),
+            y: Math.floor(y),
+        })
 
         applyBrush(x, y)
         render()

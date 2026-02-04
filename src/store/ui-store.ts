@@ -1,5 +1,8 @@
 import { create } from 'zustand'
 import { WorkflowStage } from '@/types'
+import type { CameraState } from '@/types'
+import { VIEWER } from '@/lib/constants'
+import { createDefaultCamera } from '@/lib/camera'
 
 export type WorkflowTransitionSource = 'cta' | 'stepper' | 'keyboard' | 'system'
 
@@ -19,6 +22,8 @@ interface UIState {
   workflowTransitionSeq: number
   viewMode: 'Regions' | 'Grid'
   highlightColorKey: string | null
+  selectCamera: CameraState
+  viewerCamera: CameraState
   setShowGrid: (showGrid: boolean) => void
   setShowMarkers: (showMarkers: boolean) => void
   setWorkflowStage: (
@@ -31,6 +36,8 @@ interface UIState {
   clearWorkflowTransition: (id: number) => void
   setViewMode: (mode: 'Regions' | 'Grid') => void
   setHighlightColorKey: (key: string | null) => void
+  setSelectCamera: (camera: CameraState) => void
+  setViewerCamera: (camera: CameraState) => void
 }
 
 export const useUIStore = create<UIState>((set) => ({
@@ -41,6 +48,8 @@ export const useUIStore = create<UIState>((set) => ({
   workflowTransitionSeq: 0,
   viewMode: 'Regions',
   highlightColorKey: null,
+  selectCamera: createDefaultCamera(VIEWER.MIN_ZOOM, VIEWER.MAX_ZOOM),
+  viewerCamera: createDefaultCamera(VIEWER.MIN_ZOOM, VIEWER.MAX_ZOOM),
   setShowGrid: (showGrid) => set({ showGrid }),
   setShowMarkers: (showMarkers) => set({ showMarkers }),
   setWorkflowStage: (stage, opts) =>
@@ -78,4 +87,6 @@ export const useUIStore = create<UIState>((set) => ({
     }),
   setViewMode: (mode) => set({ viewMode: mode }),
   setHighlightColorKey: (key) => set({ highlightColorKey: key }),
+  setSelectCamera: (camera) => set({ selectCamera: camera }),
+  setViewerCamera: (camera) => set({ viewerCamera: camera }),
 }))
