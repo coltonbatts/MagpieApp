@@ -1,7 +1,9 @@
 mod embroidery;
 mod pdf_export;
+mod selection;
 
 use embroidery::{process_pattern, process_pattern_from_path, PatternResult, ProcessingConfig};
+use selection::{init_workspace, magic_wand_click, refine_mask, MagicWandParams, RefinementParams};
 use pdf_export::PdfExportPayload;
 use rfd::FileDialog;
 use serde::Deserialize;
@@ -192,6 +194,34 @@ fn process_embroidery_pattern_from_file(
     Ok(result)
 }
 
+#[tauri::command]
+fn init_selection_workspace(
+    image_rgba: Vec<u8>,
+    width: u32,
+    height: u32,
+    workspace_id: String,
+) -> Result<(u32, u32), String> {
+    init_workspace(&image_rgba, width, height, workspace_id)
+}
+
+#[tauri::command]
+fn magic_wand_click_command(
+    workspace_id: String,
+    params: MagicWandParams,
+) -> Result<Vec<u8>, String> {
+    magic_wand_click(&workspace_id, &params)
+}
+
+#[tauri::command]
+fn refine_selection(
+    mask: Vec<u8>,
+    width: u32,
+    height: u32,
+    params: RefinementParams,
+) -> Result<Vec<u8>, String> {
+    Ok(refine_mask(&mask, width, height, &params))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -206,6 +236,9 @@ pub fn run() {
             export_pattern_pdf,
             process_embroidery_pattern,
             process_embroidery_pattern_from_file,
+            init_selection_workspace,
+            magic_wand_click_command,
+            refine_selection,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

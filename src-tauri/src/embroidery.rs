@@ -6,7 +6,7 @@
 use palette::{color_difference::Ciede2000, white_point::D65, FromColor, Lab, Srgb};
 use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::OnceLock;
 
 /// DMC thread color entry with precomputed LAB values
@@ -640,6 +640,7 @@ fn remove_small_regions(
         }
     }
 }
+
 
 /// Main pattern processing function
 pub fn process_pattern(

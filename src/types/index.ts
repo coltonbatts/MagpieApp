@@ -120,6 +120,15 @@ export interface MaskConfig {
   opacity: number
 }
 
+export interface MagicWandConfig {
+  tolerance: number
+  edgeStop: number
+}
+
+export interface RefinementConfig {
+  strength: number // 0..100
+}
+
 /**
  * SelectionArtifact is the definitive representation of WHAT is being stitched.
  * It is produced in SelectStage and consumed by Build/Export.

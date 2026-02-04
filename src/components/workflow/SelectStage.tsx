@@ -1,4 +1,5 @@
-import React, { useState } from 'react'
+import { useState, useEffect } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
 import { SelectionArtifactModel } from '@/model/SelectionArtifact'
@@ -11,17 +12,25 @@ export function SelectStage() {
         selectionWorkingImage,
         referenceId,
         selection,
+        setSelection,
+        selectionMode,
+        setSelectionMode,
+        magicWandConfig,
+        setMagicWandConfig,
+        refinementConfig,
+        setRefinementConfig,
+        selectionWorkspaceId,
+        setSelectionWorkspaceId,
+        maskConfig,
+        setMaskConfig,
         fabricSetup,
         referencePlacement,
-        setSelection,
-        maskConfig,
-        setMaskConfig
     } = usePatternStore()
     const { setWorkflowStage } = useUIStore()
-    const [tool, setTool] = useState<'brush' | 'eraser'>('brush')
+    const [tool, setTool] = useState<'brush' | 'eraser' | 'magic'>('brush')
 
     // Initialize selection if it doesn't exist
-    React.useEffect(() => {
+    useEffect(() => {
         if (selectionWorkingImage && referenceId && !selection) {
             setSelection(SelectionArtifactModel.createDefault(
                 selectionWorkingImage.width,
@@ -31,23 +40,34 @@ export function SelectStage() {
         }
     }, [selectionWorkingImage, referenceId, selection, setSelection])
 
+    // Initialize Rust selection workspace
+    useEffect(() => {
+        let isMounted = true
+        if (selectionWorkingImage && referenceId) {
+            const initWorkspace = async () => {
+                try {
+                    const workspaceId = `ws-${referenceId}`
+                    await invoke('init_selection_workspace', {
+                        imageRgba: Array.from(selectionWorkingImage.data),
+                        width: selectionWorkingImage.width,
+                        height: selectionWorkingImage.height,
+                        workspaceId
+                    })
+                    if (isMounted) setSelectionWorkspaceId(workspaceId)
+                } catch (err) {
+                    console.error('Failed to initialize selection workspace:', err)
+                }
+            }
+            initWorkspace()
+        }
+        return () => { isMounted = false }
+    }, [selectionWorkingImage, referenceId, setSelectionWorkspaceId])
+
     const handleCommit = (finalMask: Uint8Array) => {
         if (!selection) return
         setSelection(SelectionArtifactModel.updateMask(selection, finalMask))
     }
 
-    const handleAutoSubject = () => {
-        if (!selectionWorkingImage || !selection) return
-        const { width, height } = selectionWorkingImage
-        const newMask = new Uint8Array(width * height).fill(0)
-        // Simple center-weighted "Magic" heuristic for initial view
-        for (let y = Math.floor(height * 0.25); y < height * 0.75; y++) {
-            for (let x = Math.floor(width * 0.25); x < width * 0.75; x++) {
-                newMask[y * width + x] = 1
-            }
-        }
-        handleCommit(newMask)
-    }
 
     const handleInvert = () => {
         if (!selection) return
@@ -112,6 +132,88 @@ export function SelectStage() {
                             </Button>
                         </div>
 
+                        <Button
+                            variant={tool === 'magic' ? 'primary' : 'secondary'}
+                            className={`w-full h-12 flex-row gap-2 rounded-2xl transition-all ${tool === 'magic' ? 'shadow-lg ring-1 ring-primary/20 bg-gradient-to-r from-indigo-500/10 to-violet-500/10' : ''}`}
+                            onClick={() => setTool('magic')}
+                        >
+                            <span className="text-xl">✨</span>
+                            <span className="text-[10px] font-bold uppercase tracking-widest">Auto Select (Magic Wand)</span>
+                        </Button>
+
+                        {tool === 'magic' && (
+                            <div className="space-y-4 pt-2 animate-in fade-in slide-in-from-top-2 duration-300">
+                                <div className="grid grid-cols-3 gap-2">
+                                    {(['replace', 'add', 'subtract'] as const).map((m) => (
+                                        <Button
+                                            key={m}
+                                            variant={selectionMode === m ? 'primary' : 'secondary'}
+                                            size="sm"
+                                            className="h-8 text-[9px] uppercase font-bold"
+                                            onClick={() => setSelectionMode(m)}
+                                        >
+                                            {m}
+                                        </Button>
+                                    ))}
+                                </div>
+                                <div className="space-y-3">
+                                    <div className="flex justify-between">
+                                        <span className="text-xs font-medium text-fg-muted">Stickiness</span>
+                                        <span className="text-[10px] font-mono text-fg-subtle">{magicWandConfig.tolerance}</span>
+                                    </div>
+                                    <Input
+                                        variant="slider"
+                                        min={1} max={100} step={1}
+                                        value={magicWandConfig.tolerance}
+                                        onChange={(e) => setMagicWandConfig({
+                                            tolerance: parseInt(e.target.value),
+                                            edgeStop: Math.max(10, parseInt(e.target.value) * 2)
+                                        })}
+                                    />
+                                </div>
+
+                                <div className="pt-4 border-t border-gray-100 flex flex-col gap-3">
+                                    <div className="flex justify-between">
+                                        <span className="text-[10px] font-bold uppercase tracking-wider text-fg-subtle">Selection Refinement</span>
+                                        <span className="text-[10px] font-mono text-fg-subtle">{refinementConfig.strength}%</span>
+                                    </div>
+                                    <Input
+                                        variant="slider"
+                                        min={0} max={100} step={1}
+                                        value={refinementConfig.strength}
+                                        onChange={(e) => setRefinementConfig({ strength: parseInt(e.target.value) })}
+                                    />
+                                    <Button
+                                        variant="secondary"
+                                        size="sm"
+                                        className="w-full h-8 text-[9px] uppercase font-bold border-indigo-200/50 hover:bg-indigo-50/50"
+                                        onClick={async () => {
+                                            if (!selection) return
+                                            try {
+                                                const strength = refinementConfig.strength
+                                                const params = {
+                                                    min_island_area: Math.round(strength * 0.5 + 4),
+                                                    hole_fill_area: Math.round(strength * 1.0 + 8),
+                                                    smoothing_passes: strength > 50 ? 2 : 1
+                                                }
+                                                const refinedMask = await invoke<number[]>('refine_selection', {
+                                                    mask: Array.from(selection.mask),
+                                                    width: selection.width,
+                                                    height: selection.height,
+                                                    params
+                                                })
+                                                handleCommit(new Uint8Array(refinedMask))
+                                            } catch (err) {
+                                                console.error('Refinement failed:', err)
+                                            }
+                                        }}
+                                    >
+                                        🧹 Refine Current Mask
+                                    </Button>
+                                </div>
+                            </div>
+                        )}
+
                         <div className="space-y-6 pt-4">
                             <div className="space-y-3">
                                 <div className="flex justify-between">
@@ -149,12 +251,6 @@ export function SelectStage() {
                     </section>
 
                     <div className="flex-1 flex flex-col justify-end gap-3 pb-4">
-                        <Button
-                            onClick={handleAutoSubject}
-                            className="w-full h-12 text-[10px] font-bold tracking-[0.2em] uppercase bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-xl border-0"
-                        >
-                            ✨ Smart Selection
-                        </Button>
                         <div className="flex gap-3">
                             <Button
                                 className="flex-1 h-12 text-sm font-bold tracking-tight"
@@ -184,6 +280,9 @@ export function SelectStage() {
                         placement={referencePlacement}
                         config={maskConfig}
                         tool={tool}
+                        magicWandConfig={magicWandConfig}
+                        selectionWorkspaceId={selectionWorkspaceId}
+                        selectionMode={selectionMode}
                         onMaskChange={() => { }} // Store update deferred to commit for performance
                         onCommit={(finalMask) => handleCommit(finalMask)}
                     />

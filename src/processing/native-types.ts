@@ -65,3 +65,17 @@ export const DEFAULT_NATIVE_CONFIG: NativeProcessingConfig = {
   simplify_amount: 0.2,
   min_region_size: 4,
 }
+/** Magic Wand selection parameters */
+export interface NativeMagicWandParams {
+  seed_x: number
+  seed_y: number
+  tolerance: number
+  edge_stop: number
+}
+
+/** Mask refinement parameters */
+export interface NativeRefinementParams {
+  min_island_area: number
+  hole_fill_area: number
+  smoothing_passes: number
+}

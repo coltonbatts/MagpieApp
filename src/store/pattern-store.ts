@@ -14,6 +14,8 @@ import type {
   MaskConfig,
   ReferencePlacement,
   SelectionArtifact,
+  MagicWandConfig,
+  RefinementConfig,
 } from '@/types'
 import { SelectionArtifactModel } from '@/model/SelectionArtifact'
 
@@ -26,6 +28,10 @@ interface PatternState {
   referencePlacement: ReferencePlacement | null
   selection: SelectionArtifact | null
   maskConfig: MaskConfig
+  magicWandConfig: MagicWandConfig
+  selectionMode: 'replace' | 'add' | 'subtract'
+  refinementConfig: RefinementConfig
+  selectionWorkspaceId: string | null
   pattern: Pattern | null
   basePattern: Pattern | null
   manualEdits: ManualStitchEdits
@@ -39,6 +45,10 @@ interface PatternState {
   setReferencePlacement: (placement: ReferencePlacement | null) => void
   setSelection: (selection: SelectionArtifact | null) => void
   setMaskConfig: (config: Partial<MaskConfig>) => void
+  setMagicWandConfig: (config: Partial<MagicWandConfig>) => void
+  setSelectionMode: (mode: 'replace' | 'add' | 'subtract') => void
+  setRefinementConfig: (config: Partial<RefinementConfig>) => void
+  setSelectionWorkspaceId: (id: string | null) => void
   setPattern: (pattern: Pattern | null) => void
   setManualEdits: (edits: ManualStitchEdit[]) => void
   applyManualEdits: (edits: ManualStitchEdit[]) => void
@@ -75,6 +85,15 @@ export const usePatternStore = create<PatternState>((set) => ({
     brushSize: 20,
     opacity: 0.5,
   },
+  magicWandConfig: {
+    tolerance: 15,
+    edgeStop: 30,
+  },
+  selectionMode: 'replace',
+  refinementConfig: {
+    strength: 20,
+  },
+  selectionWorkspaceId: null,
   pattern: null,
   basePattern: null,
   manualEdits: {},
@@ -150,6 +169,16 @@ export const usePatternStore = create<PatternState>((set) => ({
     set((state) => ({
       maskConfig: { ...state.maskConfig, ...config },
     })),
+  setMagicWandConfig: (config) =>
+    set((state) => ({
+      magicWandConfig: { ...state.magicWandConfig, ...config },
+    })),
+  setSelectionMode: (selectionMode) => set({ selectionMode }),
+  setRefinementConfig: (config) =>
+    set((state) => ({
+      refinementConfig: { ...state.refinementConfig, ...config },
+    })),
+  setSelectionWorkspaceId: (selectionWorkspaceId) => set({ selectionWorkspaceId }),
   setPattern: (pattern) =>
     set((state) => ({
       basePattern: pattern,

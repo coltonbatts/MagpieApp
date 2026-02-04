@@ -1,12 +1,16 @@
 import React, { useEffect, useRef, useCallback } from 'react'
-import type { ReferencePlacement, MaskConfig } from '@/types'
+import type { ReferencePlacement, MaskConfig, MagicWandConfig } from '@/types'
+import { invoke } from '@tauri-apps/api/core'
 
 interface MaskLayerProps {
     image: ImageData
     mask: Uint8Array
     placement: ReferencePlacement
     config: MaskConfig
-    tool: 'brush' | 'eraser'
+    tool: 'brush' | 'eraser' | 'magic'
+    magicWandConfig?: MagicWandConfig
+    selectionWorkspaceId?: string | null
+    selectionMode?: 'replace' | 'add' | 'subtract'
     onMaskChange: (newMask: Uint8Array) => void
     onCommit: (newMask: Uint8Array) => void
 }
@@ -22,6 +26,9 @@ export function MaskLayer({
     placement,
     config,
     tool,
+    magicWandConfig,
+    selectionWorkspaceId,
+    selectionMode = 'replace',
     onMaskChange,
     onCommit
 }: MaskLayerProps) {
@@ -91,10 +98,60 @@ export function MaskLayer({
         render()
     }, [render])
 
-    const handlePointerDown = (e: React.PointerEvent) => {
+    const handlePointerDown = async (e: React.PointerEvent) => {
+        if (tool === 'magic') {
+            await handleMagicWandClick(e)
+            return
+        }
         isDrawing.current = true
         e.currentTarget.setPointerCapture(e.pointerId)
         handlePointerUpdate(e)
+    }
+
+    const handleMagicWandClick = async (e: React.PointerEvent) => {
+        const canvas = canvasRef.current
+        if (!canvas || !magicWandConfig || !selectionWorkspaceId) return
+
+        const rect = canvas.getBoundingClientRect()
+        const scaleX = canvas.width / rect.width
+        const scaleY = canvas.height / rect.height
+
+        const x = Math.floor((e.clientX - rect.left) * scaleX)
+        const y = Math.floor((e.clientY - rect.top) * scaleY)
+
+        try {
+            const resultMask = await invoke<number[]>('magic_wand_click_command', {
+                workspaceId: selectionWorkspaceId,
+                params: {
+                    seed_x: x,
+                    seed_y: y,
+                    tolerance: magicWandConfig.tolerance,
+                    edge_stop: magicWandConfig.edgeStop
+                }
+            })
+
+            const newMask = new Uint8Array(maskCopyRef.current.length)
+            const resultArr = new Uint8Array(resultMask)
+
+            if (selectionMode === 'replace') {
+                newMask.set(resultArr)
+            } else if (selectionMode === 'add') {
+                for (let i = 0; i < newMask.length; i++) {
+                    newMask[i] = maskCopyRef.current[i] | resultArr[i]
+                }
+            } else if (selectionMode === 'subtract') {
+                for (let i = 0; i < newMask.length; i++) {
+                    newMask[i] = maskCopyRef.current[i] & (resultArr[i] === 1 ? 0 : 1)
+                }
+            }
+
+            maskCopyRef.current = newMask
+            render()
+            onMaskChange(newMask)
+            onCommit(newMask)
+        } catch (err) {
+            console.error('Magic Wand failed:', err)
+        }
     }
 
     const handlePointerUpdate = (e: React.PointerEvent) => {
