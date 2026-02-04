@@ -97,12 +97,13 @@ export interface HoopConfig {
   shape: HoopShape
   widthMm: number
   heightMm: number
+  marginMm: number
 }
 
 export interface FabricSetup {
-  type: 'linen' | 'aida' | 'evenweave'
-  texture: 'natural' | 'soft' | 'coarse'
-  count: 11 | 14 | 16 | 18
+  type: 'linen' | 'cotton' | 'muslin' | 'aida' | 'evenweave'
+  textureIntensity: number // 0..1
+  count: number // 10..40 (coarse to fine)
   color: RGBColor
   hoop: HoopConfig
 }

@@ -1,5 +1,6 @@
 import type { ManualStitchEdit, ManualStitchEdits, Stitch } from '@/types'
 import { Pattern } from './Pattern'
+import { incrementDevCounter } from '@/lib/dev-instrumentation'
 
 const FABRIC_HEX = '#FFFFFF'
 
@@ -43,6 +44,7 @@ export function applyManualEditsToPattern(
 ): Pattern {
   const list = Array.isArray(edits) ? edits : editsArrayFromMap(edits)
   if (list.length === 0) return pattern
+  incrementDevCounter('manualEditApplications', `${list.length} edits`)
 
   const stitches = pattern.stitches.slice()
   let hasChanges = false

@@ -27,7 +27,9 @@ interface PatternState {
   selection: SelectionArtifact | null
   maskConfig: MaskConfig
   pattern: Pattern | null
+  basePattern: Pattern | null
   manualEdits: ManualStitchEdits
+  manualEditTool: 'paint' | 'fabric'
   processingConfig: ProcessingConfig
   isProcessing: boolean
   error: string | null
@@ -41,6 +43,7 @@ interface PatternState {
   setManualEdits: (edits: ManualStitchEdit[]) => void
   applyManualEdits: (edits: ManualStitchEdit[]) => void
   clearManualEdits: () => void
+  setManualEditTool: (tool: 'paint' | 'fabric') => void
   setProcessingConfig: (config: Partial<ProcessingConfig>) => void
   setIsProcessing: (isProcessing: boolean) => void
   setError: (error: string | null) => void
@@ -54,15 +57,16 @@ export const usePatternStore = create<PatternState>((set) => ({
   selectionWorkingImage: null,
   fabricSetup: {
     type: 'linen',
-    texture: 'natural',
+    textureIntensity: 0.5,
     count: 14,
     color: { r: 245, g: 245, b: 220 },
     hoop: {
-      presetId: 'round-150',
-      label: 'Round 150mm',
+      presetId: 'round-254',
+      label: 'Round 10"',
       shape: 'round',
-      widthMm: 150,
-      heightMm: 150,
+      widthMm: 254,
+      heightMm: 254,
+      marginMm: 10,
     },
   },
   referencePlacement: null,
@@ -72,7 +76,9 @@ export const usePatternStore = create<PatternState>((set) => ({
     opacity: 0.5,
   },
   pattern: null,
+  basePattern: null,
   manualEdits: {},
+  manualEditTool: 'paint',
   processingConfig: {
     colorCount: 20,
     ditherMode: 'none',
@@ -101,6 +107,8 @@ export const usePatternStore = create<PatternState>((set) => ({
       selectionWorkingImage: selectionImage,
       referenceId: newReferenceId,
       selection: null,
+      basePattern: null,
+      pattern: null,
       manualEdits: {},
     })
   },
@@ -142,13 +150,17 @@ export const usePatternStore = create<PatternState>((set) => ({
     set((state) => ({
       maskConfig: { ...state.maskConfig, ...config },
     })),
-  setPattern: (pattern) => set({ pattern }),
+  setPattern: (pattern) =>
+    set((state) => ({
+      basePattern: pattern,
+      pattern: pattern ? applyManualEditsToPattern(pattern, editsArrayFromMap(state.manualEdits)) : pattern,
+    })),
   setManualEdits: (edits) =>
     set((state) => {
       const manualEdits = mergeManualEdits({}, edits)
       return {
         manualEdits,
-        pattern: state.pattern ? applyManualEditsToPattern(state.pattern, editsArrayFromMap(manualEdits)) : state.pattern,
+        pattern: state.basePattern ? applyManualEditsToPattern(state.basePattern, editsArrayFromMap(manualEdits)) : state.pattern,
       }
     }),
   applyManualEdits: (edits) =>
@@ -156,10 +168,15 @@ export const usePatternStore = create<PatternState>((set) => ({
       const manualEdits = mergeManualEdits(state.manualEdits, edits)
       return {
         manualEdits,
-        pattern: state.pattern ? applyManualEditsToPattern(state.pattern, editsArrayFromMap(manualEdits)) : state.pattern,
+        pattern: state.basePattern ? applyManualEditsToPattern(state.basePattern, editsArrayFromMap(manualEdits)) : state.pattern,
       }
     }),
-  clearManualEdits: () => set({ manualEdits: {} }),
+  clearManualEdits: () =>
+    set((state) => ({
+      manualEdits: {},
+      pattern: state.basePattern,
+    })),
+  setManualEditTool: (manualEditTool) => set({ manualEditTool }),
   setProcessingConfig: (config) =>
     set((state) => ({
       processingConfig: { ...state.processingConfig, ...config },
@@ -176,8 +193,10 @@ export const usePatternStore = create<PatternState>((set) => ({
         referenceId: null,
         referencePlacement: null,
         selection: null,
+        basePattern: null,
         pattern: null,
         manualEdits: {},
+        manualEditTool: 'paint',
         isProcessing: false,
         error: null,
       }

@@ -11,12 +11,14 @@ import type {
   ProcessingConfig,
   ReferencePlacement,
   SelectionArtifact,
+  ManualStitchEditMode,
   WorkflowStage,
 } from '@/types'
 
 const PROJECT_VERSION = 1
 const RECENT_PROJECTS_KEY = 'magpie:recentProjects'
 const RECENT_PROJECT_LIMIT = 8
+const LARGE_IMAGE_WARNING_BYTES = 8 * 1024 * 1024
 
 interface SerializedSelection {
   id: string
@@ -29,7 +31,9 @@ interface SerializedSelection {
 
 interface MagpieProjectFileV1 {
   version: typeof PROJECT_VERSION
+  createdAt: string
   savedAt: string
+  appVersion?: string
   workflowStage: WorkflowStage
   sourceImage: {
     mime: 'image/png'
@@ -43,6 +47,7 @@ interface MagpieProjectFileV1 {
   maskConfig: MaskConfig
   selection: SerializedSelection | null
   manualEdits: ManualStitchEdit[]
+  manualEditTool: ManualStitchEditMode
 }
 
 export interface RecentProjectEntry {
@@ -51,7 +56,11 @@ export interface RecentProjectEntry {
   savedAt: string
 }
 
-export async function saveCurrentProjectToPath(path: string, workflowStage: WorkflowStage): Promise<void> {
+export interface SaveProjectResult {
+  warning?: string
+}
+
+export async function saveCurrentProjectToPath(path: string, workflowStage: WorkflowStage): Promise<SaveProjectResult> {
   const platform = await getPlatformAdapter()
   const state = usePatternStore.getState()
 
@@ -60,9 +69,7 @@ export async function saveCurrentProjectToPath(path: string, workflowStage: Work
   }
 
   const sourceImageBytes = await imageBitmapToPngBytes(state.originalImage)
-  const project: MagpieProjectFileV1 = {
-    version: PROJECT_VERSION,
-    savedAt: new Date().toISOString(),
+  const project = createProjectFile({
     workflowStage,
     sourceImage: {
       mime: 'image/png',
@@ -76,64 +83,96 @@ export async function saveCurrentProjectToPath(path: string, workflowStage: Work
     maskConfig: state.maskConfig,
     selection: serializeSelection(state.selection),
     manualEdits: editsArrayFromMap(state.manualEdits),
-  }
+    manualEditTool: state.manualEditTool,
+  })
 
   await platform.writeFile({
     path,
-    contents: JSON.stringify(project),
+    contents: stringifyProjectFile(project),
   })
   rememberRecentProject(path, project.savedAt)
+
+  if (sourceImageBytes.byteLength > LARGE_IMAGE_WARNING_BYTES) {
+    return {
+      warning: 'Project saved, but embedded source image is large. Expect a larger .magpie file.',
+    }
+  }
+
+  return {}
 }
 
 export async function loadProjectFromPath(path: string): Promise<void> {
-  const platform = await getPlatformAdapter()
-  const bytes = await platform.readFile(path)
-  const raw = new TextDecoder().decode(bytes)
-  const parsed = JSON.parse(raw) as Partial<MagpieProjectFileV1>
+  try {
+    const platform = await getPlatformAdapter()
+    const bytes = await platform.readFile(path)
+    const raw = new TextDecoder().decode(bytes)
+    const parsed = parseAndMigrateProjectFile(raw)
 
-  if (parsed.version !== PROJECT_VERSION || !parsed.sourceImage || !parsed.processingConfig || !parsed.fabricSetup) {
-    throw new Error('Unsupported or invalid Magpie project file.')
+    const sourceBytes = base64ToBytes(parsed.sourceImage.dataBase64)
+    const sourceBitmap = await decodePngToImageBitmap(sourceBytes)
+    const processingConfig = parsed.processingConfig
+    const buildImage = normalizeImage(sourceBitmap, processingConfig.targetSize)
+    const selectionImage = normalizeImageCapped(
+      sourceBitmap,
+      processingConfig.selectionWorkingSize,
+      processingConfig.selectionMaxMegapixels
+    )
+
+    const referenceId = `ref_${Math.random().toString(36).slice(2, 9)}`
+    const selection = deserializeSelection(parsed.selection ?? null, referenceId)
+    const selectionForStore =
+      selection && (selection.width !== selectionImage.width || selection.height !== selectionImage.height)
+        ? SelectionArtifactModel.resampleTo(selection, selectionImage.width, selectionImage.height)
+        : selection
+
+    usePatternStore.setState((state) => {
+      state.originalImage?.close()
+      return {
+        referenceId,
+        originalImage: sourceBitmap,
+        normalizedImage: buildImage,
+        selectionWorkingImage: selectionImage,
+        fabricSetup: parsed.fabricSetup,
+        referencePlacement: parsed.referencePlacement ?? null,
+        selection: selectionForStore,
+        maskConfig: parsed.maskConfig ?? state.maskConfig,
+        basePattern: null,
+        pattern: null,
+        manualEdits: editsMapFromArray(parsed.manualEdits ?? []),
+        manualEditTool: parsed.manualEditTool ?? 'paint',
+        processingConfig: processingConfig,
+        isProcessing: false,
+        error: null,
+      }
+    })
+
+    const workflowStage = parsed.workflowStage ?? 'Build'
+    useUIStore.getState().setWorkflowStage(workflowStage)
+    rememberRecentProject(path, new Date().toISOString())
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unknown project load failure.'
+    throw new Error(message.startsWith('Could not open project:') ? message : `Could not open project: ${message}`)
   }
+}
 
-  const sourceBytes = base64ToBytes(parsed.sourceImage.dataBase64)
-  const sourceBitmap = await decodePngToImageBitmap(sourceBytes)
-  const processingConfig = parsed.processingConfig
-  const buildImage = normalizeImage(sourceBitmap, processingConfig.targetSize)
-  const selectionImage = normalizeImageCapped(
-    sourceBitmap,
-    processingConfig.selectionWorkingSize,
-    processingConfig.selectionMaxMegapixels
-  )
+export async function getRecentProjectsPruned(): Promise<RecentProjectEntry[]> {
+  const platform = await getPlatformAdapter()
+  const entries = getRecentProjects()
+  if (!platform.isDesktop || entries.length === 0) return entries
 
-  const referenceId = `ref_${Math.random().toString(36).slice(2, 9)}`
-  const selection = deserializeSelection(parsed.selection ?? null, referenceId)
-  const selectionForStore =
-    selection && (selection.width !== selectionImage.width || selection.height !== selectionImage.height)
-      ? SelectionArtifactModel.resampleTo(selection, selectionImage.width, selectionImage.height)
-      : selection
-
-  usePatternStore.setState((state) => {
-    state.originalImage?.close()
-    return {
-      referenceId,
-      originalImage: sourceBitmap,
-      normalizedImage: buildImage,
-      selectionWorkingImage: selectionImage,
-      fabricSetup: parsed.fabricSetup!,
-      referencePlacement: parsed.referencePlacement ?? null,
-      selection: selectionForStore,
-      maskConfig: parsed.maskConfig ?? state.maskConfig,
-      pattern: null,
-      manualEdits: editsMapFromArray(parsed.manualEdits ?? []),
-      processingConfig: processingConfig,
-      isProcessing: false,
-      error: null,
+  const kept: RecentProjectEntry[] = []
+  let removedAny = false
+  for (const entry of entries) {
+    if (await platform.fileExists(entry.path)) {
+      kept.push(entry)
+    } else {
+      removedAny = true
     }
-  })
-
-  const workflowStage = parsed.workflowStage ?? 'Build'
-  useUIStore.getState().setWorkflowStage(workflowStage)
-  rememberRecentProject(path, new Date().toISOString())
+  }
+  if (removedAny && typeof window !== 'undefined') {
+    window.localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(kept))
+  }
+  return kept
 }
 
 export function getRecentProjects(): RecentProjectEntry[] {
@@ -157,6 +196,33 @@ export function removeRecentProject(path: string): void {
   window.localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(remaining))
 }
 
+export function createProjectFile(input: Omit<MagpieProjectFileV1, 'version' | 'createdAt' | 'savedAt' | 'appVersion'>): MagpieProjectFileV1 {
+  const now = new Date().toISOString()
+  const appVersion = import.meta.env.VITE_APP_VERSION as string | undefined
+  return {
+    version: PROJECT_VERSION,
+    createdAt: now,
+    savedAt: new Date().toISOString(),
+    appVersion,
+    ...input,
+  }
+}
+
+export function stringifyProjectFile(project: MagpieProjectFileV1): string {
+  return JSON.stringify(project)
+}
+
+export function parseAndMigrateProjectFile(raw: string): MagpieProjectFileV1 {
+  let parsedUnknown: unknown
+  try {
+    parsedUnknown = JSON.parse(raw)
+  } catch {
+    throw new Error('Could not open project: file is not valid JSON.')
+  }
+
+  return migrateProjectFile(parsedUnknown)
+}
+
 function rememberRecentProject(path: string, savedAt: string): void {
   if (typeof window === 'undefined') return
 
@@ -164,6 +230,52 @@ function rememberRecentProject(path: string, savedAt: string): void {
   const existing = getRecentProjects().filter((entry) => entry.path !== path)
   const next: RecentProjectEntry[] = [{ path, name, savedAt }, ...existing].slice(0, RECENT_PROJECT_LIMIT)
   window.localStorage.setItem(RECENT_PROJECTS_KEY, JSON.stringify(next))
+}
+
+export function migrateProjectFile(project: unknown): MagpieProjectFileV1 {
+  if (!project || typeof project !== 'object') {
+    throw new Error('Could not open project: expected a JSON object.')
+  }
+
+  const value = project as Partial<MagpieProjectFileV1> & { version?: unknown }
+  if (value.version === PROJECT_VERSION) {
+    return validateProjectFileV1(value)
+  }
+
+  if (typeof value.version !== 'number') {
+    throw new Error('Could not open project: missing version metadata.')
+  }
+
+  // Migration stub for future versions.
+  throw new Error(`Project version ${value.version} is not supported by this build yet.`)
+}
+
+function validateProjectFileV1(project: Partial<MagpieProjectFileV1>): MagpieProjectFileV1 {
+  if (!project.sourceImage || !project.processingConfig || !project.fabricSetup) {
+    throw new Error('Could not open project: required fields are missing.')
+  }
+  if (project.sourceImage.mime !== 'image/png' || typeof project.sourceImage.dataBase64 !== 'string') {
+    throw new Error('Could not open project: source image payload is invalid.')
+  }
+
+  return {
+    version: PROJECT_VERSION,
+    createdAt: project.createdAt ?? project.savedAt ?? new Date().toISOString(),
+    savedAt: project.savedAt ?? new Date().toISOString(),
+    appVersion: project.appVersion,
+    workflowStage: project.workflowStage ?? 'Build',
+    sourceImage: project.sourceImage,
+    fabricSetup: project.fabricSetup,
+    referencePlacement: project.referencePlacement ?? null,
+    processingConfig: project.processingConfig,
+    maskConfig: project.maskConfig ?? {
+      brushSize: 20,
+      opacity: 0.5,
+    },
+    selection: project.selection ?? null,
+    manualEdits: Array.isArray(project.manualEdits) ? project.manualEdits : [],
+    manualEditTool: project.manualEditTool === 'fabric' ? 'fabric' : 'paint',
+  }
 }
 
 function serializeSelection(selection: SelectionArtifact | null): SerializedSelection | null {

@@ -1,8 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { ControlPanel } from './components/ControlPanel'
 import { Layout } from './components/Layout'
 import { Legend } from './components/Legend'
-import { applyManualEditsToPattern } from './model/manual-edits'
 import { SelectionArtifactModel } from './model/SelectionArtifact'
 import { usePatternStore } from './store/pattern-store'
 import { useUIStore } from './store/ui-store'
@@ -16,18 +15,13 @@ import { FabricStage } from './components/workflow/FabricStage'
 import { ReferenceStage } from './components/workflow/ReferenceStage'
 import { SelectStage } from './components/workflow/SelectStage'
 import { processPattern } from './processing/process-pattern'
+import { incrementDevCounter } from './lib/dev-instrumentation'
 
 export default function App() {
-  const { pattern, normalizedImage, referenceId, selection, processingConfig, manualEdits, setPattern } = usePatternStore()
+  const { pattern, normalizedImage, referenceId, selection, processingConfig, setPattern } = usePatternStore()
   const { workflowStage } = useUIStore()
   const [showDMCTester, setShowDMCTester] = useState(false)
   const isDev = import.meta.env.DEV
-  const manualEditsRef = useRef(manualEdits)
-
-  useEffect(() => {
-    manualEditsRef.current = manualEdits
-  }, [manualEdits])
-
   useEffect(() => {
     if (!isDev) return
     if (window.localStorage.getItem('magpie:runColorSanity') !== '1') return
@@ -59,6 +53,8 @@ export default function App() {
         }
 
         // Use the unified processing API (automatically uses native on desktop)
+        incrementDevCounter('processInvocations', 'App.updatePattern')
+
         const { pattern: nextPattern } = await processPattern({
           image: normalizedImage!,
           config: processingConfig,
@@ -66,9 +62,8 @@ export default function App() {
         })
 
         if (isMounted) {
-          const nextPatternWithEdits = applyManualEditsToPattern(nextPattern, manualEditsRef.current)
           if (debugColor) logPatternPaletteDebug(nextPattern)
-          setPattern(nextPatternWithEdits)
+          setPattern(nextPattern)
         }
       } catch (err) {
         console.error('Failed to process pattern:', err)

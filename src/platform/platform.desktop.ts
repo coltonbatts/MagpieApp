@@ -40,6 +40,10 @@ async function readFile(path: string): Promise<Uint8Array> {
   return new Uint8Array(bytes)
 }
 
+async function fileExists(path: string): Promise<boolean> {
+  return invoke<boolean>('desktop_file_exists', { path })
+}
+
 async function writeFile(payload: FileWritePayload): Promise<void> {
   const contents =
     typeof payload.contents === 'string'
@@ -68,6 +72,7 @@ export const desktopPlatformAdapter: PlatformAdapter = {
   selectOpenPath,
   selectFolder,
   readFile,
+  fileExists,
   writeFile,
   writeFilesBatch,
   openInFolder,

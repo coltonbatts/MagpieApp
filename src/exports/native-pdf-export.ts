@@ -20,6 +20,9 @@ interface NativePdfLegendEntry {
 
 interface NativePdfPayload {
   title: string
+  mode: 'blueprint' | 'outline'
+  page_size: 'a4' | 'letter'
+  template_style?: 'minimal' | 'studio'
   width: number
   height: number
   stitches: NativePdfStitch[]
@@ -29,10 +32,16 @@ interface NativePdfPayload {
 export async function generateNativePatternPdf(
   pattern: Pattern,
   legend: LegendEntry[],
-  title: string
+  title: string,
+  pageSize: 'A4' | 'Letter',
+  mode: 'blueprint' | 'outline' = 'blueprint',
+  templateStyle?: 'minimal' | 'studio'
 ): Promise<Uint8Array> {
   const payload: NativePdfPayload = {
     title,
+    mode,
+    page_size: pageSize.toLowerCase() as 'a4' | 'letter',
+    template_style: templateStyle,
     width: pattern.width,
     height: pattern.height,
     stitches: pattern.stitches.map((stitch) => ({

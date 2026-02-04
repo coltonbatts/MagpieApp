@@ -41,6 +41,7 @@ export interface PlatformAdapter {
   selectOpenPath: (options?: OpenDialogOptions) => Promise<string | null>
   selectFolder: (options?: FolderDialogOptions) => Promise<string | null>
   readFile: (path: string) => Promise<Uint8Array>
+  fileExists: (path: string) => Promise<boolean>
   writeFile: (payload: FileWritePayload) => Promise<void>
   writeFilesBatch: (items: FileWriteBatchItem[]) => Promise<void>
   openInFolder: (path: string) => Promise<void>

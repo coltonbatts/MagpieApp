@@ -10,6 +10,7 @@ import { useUIStore } from '@/store/ui-store'
 import { linearRgbToOkLab, okLabDistanceSqWeighted } from '@/processing/color-spaces'
 import { getProcessedPaths, type Point } from '@/processing/vectorize'
 import { Button, Select, SegmentedControl, Toggle } from '@/components/ui'
+import { incrementDevCounter } from '@/lib/dev-instrumentation'
 
 interface PatternViewerProps {
   pattern: Pattern | null
@@ -54,6 +55,9 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
   const pixiRef = useRef<typeof PIXINamespace | null>(null)
   const processingConfig = usePatternStore((state) => state.processingConfig)
   const applyManualEdits = usePatternStore((state) => state.applyManualEdits)
+  const clearManualEdits = usePatternStore((state) => state.clearManualEdits)
+  const editTool = usePatternStore((state) => state.manualEditTool)
+  const setEditTool = usePatternStore((state) => state.setManualEditTool)
   const worldSizeRef = useRef({ width: 1, height: 1 })
   const hasUserTransformedViewportRef = useRef(false)
   const pendingEditFrameRef = useRef<number | null>(null)
@@ -64,7 +68,6 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
   const [isReady, setIsReady] = useState(false)
   const [debugText, setDebugText] = useState('')
   const [editModeEnabled, setEditModeEnabled] = useState(false)
-  const [editTool, setEditTool] = useState<'paint' | 'fabric'>('paint')
   const [selectedPaintValue, setSelectedPaintValue] = useState<string>('')
   const isDev = import.meta.env.DEV
   const fabricIndices = useMemo(
@@ -359,6 +362,8 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
 
     const worldWidth = pattern.width * VIEWER.CELL_SIZE
     const worldHeight = pattern.height * VIEWER.CELL_SIZE
+    const worldSizeChanged =
+      worldSizeRef.current.width !== worldWidth || worldSizeRef.current.height !== worldHeight
     worldSizeRef.current = { width: worldWidth, height: worldHeight }
 
     viewportRef.current.removeChildren()
@@ -372,8 +377,13 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
       selection: pattern.selection,
       paths // Pass memoized paths
     })
-    fitViewportToWorld(viewportRef.current, worldWidth, worldHeight)
-    hasUserTransformedViewportRef.current = false
+    if (isEditingStrokeRef.current) {
+      incrementDevCounter('pixiRedrawsDuringDrag')
+    }
+    if (worldSizeChanged || !hasUserTransformedViewportRef.current) {
+      fitViewportToWorld(viewportRef.current, worldWidth, worldHeight)
+      hasUserTransformedViewportRef.current = false
+    }
   }, [isReady, pattern, activeTab, showStitchedOnly, showGrid, showLabels, showOutlines, processingConfig])
 
   if (viewerError) {
@@ -484,6 +494,18 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
           <p className="text-[11px] text-fg-subtle">
             Click or drag over stitches to apply manual overrides.
           </p>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            onClick={() => {
+              if (window.confirm('Clear all manual stitch edits for this project?')) {
+                clearManualEdits()
+              }
+            }}
+          >
+            Clear Manual Edits
+          </Button>
         </div>
       )}
 

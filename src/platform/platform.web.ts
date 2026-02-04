@@ -63,6 +63,9 @@ export const webPlatformAdapter: PlatformAdapter = {
   async readFile(_path: string): Promise<Uint8Array> {
     throw new Error('Reading local files is not supported in the web adapter.')
   },
+  async fileExists(_path: string): Promise<boolean> {
+    return false
+  },
   writeFile,
   writeFilesBatch,
   async openInFolder(_path: string): Promise<void> {

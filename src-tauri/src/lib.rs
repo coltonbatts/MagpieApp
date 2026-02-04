@@ -7,6 +7,7 @@ use rfd::FileDialog;
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Deserialize)]
 struct DialogFilter {
@@ -70,13 +71,40 @@ fn desktop_read_file(path: String) -> Result<Vec<u8>, String> {
 }
 
 #[tauri::command]
+fn desktop_file_exists(path: String) -> bool {
+    Path::new(&path).exists()
+}
+
+#[tauri::command]
 fn desktop_write_file(path: String, contents: Vec<u8>) -> Result<(), String> {
     let path_ref = Path::new(&path);
     if let Some(parent) = path_ref.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
     }
 
-    fs::write(path_ref, contents).map_err(|err| err.to_string())
+    let stamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_millis())
+        .unwrap_or(0);
+    let temp_name = format!(
+        ".{}.{}.tmp",
+        path_ref
+            .file_name()
+            .and_then(|v| v.to_str())
+            .unwrap_or("magpie-write"),
+        stamp
+    );
+    let temp_path = path_ref.with_file_name(temp_name);
+    fs::write(&temp_path, contents).map_err(|err| err.to_string())?;
+
+    fs::rename(&temp_path, path_ref).or_else(|rename_err| {
+        if path_ref.exists() {
+            fs::remove_file(path_ref).map_err(|err| err.to_string())?;
+            fs::rename(&temp_path, path_ref).map_err(|err| err.to_string())
+        } else {
+            Err(rename_err.to_string())
+        }
+    })
 }
 
 #[tauri::command]
@@ -172,6 +200,7 @@ pub fn run() {
             desktop_select_open_path,
             desktop_select_folder,
             desktop_read_file,
+            desktop_file_exists,
             desktop_write_file,
             desktop_open_in_folder,
             export_pattern_pdf,
