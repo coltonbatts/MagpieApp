@@ -154,3 +154,23 @@ export interface ManualStitchEdit {
 }
 
 export type ManualStitchEdits = Record<string, ManualStitchEdit>
+
+export interface GridPoint {
+  x: number
+  y: number
+}
+
+export interface PatternRegion {
+  id: number
+  number: number
+  colorIndex: number
+  colorKey: string
+  dmcCode: string
+  hex: string
+  area: number
+  minX: number
+  minY: number
+  centroidX: number
+  centroidY: number
+  loops: GridPoint[][]
+}

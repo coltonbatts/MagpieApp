@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { invoke } from '@tauri-apps/api/core'
 import type * as PIXINamespace from 'pixi.js'
 import type { Viewport } from 'pixi-viewport'
 import { Pattern } from '@/model/Pattern'
@@ -11,6 +12,60 @@ import { linearRgbToOkLab, okLabDistanceSqWeighted } from '@/processing/color-sp
 import { getProcessedPaths, type Point } from '@/processing/vectorize'
 import { Button, Select, SegmentedControl, Toggle } from '@/components/ui'
 import { incrementDevCounter } from '@/lib/dev-instrumentation'
+import { PatternRegion } from '@/types'
+
+function usePatternRegions(pattern: Pattern | null) {
+  const [regions, setRegions] = useState<PatternRegion[]>([])
+  const [isComputing, setIsComputing] = useState(false)
+  const lastPatternId = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!pattern) {
+      setRegions([])
+      return
+    }
+
+    const patternId = `${pattern.width}x${pattern.height}-${pattern.stitches.length}-${pattern.selection?.id || 'no-sel'}`
+    if (lastPatternId.current === patternId) return
+    lastPatternId.current = patternId
+
+    let canceled = false
+    setIsComputing(true)
+
+    const payload = {
+      width: pattern.width,
+      height: pattern.height,
+      stitches: pattern.stitches.map(s => ({
+        x: s.x,
+        y: s.y,
+        dmc_code: s.dmcCode,
+        hex: s.hex
+      })),
+      legend: pattern.getLegend().map(l => ({
+        dmc_code: l.dmcCode,
+        hex: l.hex
+      }))
+    }
+
+    invoke<PatternRegion[]>('compute_pattern_regions', { payload })
+      .then(res => {
+        if (!canceled) {
+          setRegions(res)
+          setIsComputing(false)
+        }
+      })
+      .catch(err => {
+        console.error('Failed to compute regions:', err)
+        if (!canceled) setIsComputing(false)
+      })
+
+    return () => {
+      canceled = true
+    }
+  }, [pattern])
+
+  return { regions, isComputing }
+}
 
 interface PatternViewerProps {
   pattern: Pattern | null
@@ -29,6 +84,7 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
   const [showStitchedOnly, setShowStitchedOnly] = useState(false)
 
   // Local toggles for Pattern Preview
+  const { viewMode, setViewMode, highlightColorKey, setHighlightColorKey } = useUIStore()
   const [showGrid, setShowGrid] = useState(true)
   const [showLabels, setShowLabels] = useState(true)
   const [showOutlines, setShowOutlines] = useState(true)
@@ -38,11 +94,16 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
     if (workflowStage === 'Export') {
       setActiveTab('pattern')
       setShowGrid(false)
+      setViewMode('Grid')
+    } else if (workflowStage === 'Build') {
+      setActiveTab('pattern')
+      setViewMode('Regions')
+      setShowGrid(true)
     } else {
       setActiveTab('finished')
       setShowGrid(true)
     }
-  }, [workflowStage])
+  }, [workflowStage, setViewMode])
   // 60-second QA checklist:
   // 1) Load a pattern and verify first paint is centered/fitted (not top-left).
   // 2) Drag + wheel zoom, then resize window: screen should resize but camera pose must persist.
@@ -74,6 +135,8 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
     () => (pattern ? getFabricIndices(pattern, processingConfig) : new Set<number>()),
     [pattern, processingConfig]
   )
+  const { regions } = usePatternRegions(pattern)
+
   const paths = useMemo(() => {
     if (!pattern || !pattern.labels || !pattern.paletteHex) return []
     return getProcessedPaths(pattern.labels, pattern.width, pattern.height, fabricIndices, {
@@ -333,6 +396,16 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
     flushPendingManualEdits()
   }, [flushPendingManualEdits])
 
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setHighlightColorKey(null)
+      }
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [setHighlightColorKey])
+
   useEffect(() => () => {
     if (pendingEditFrameRef.current !== null) {
       window.cancelAnimationFrame(pendingEditFrameRef.current)
@@ -375,7 +448,10 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
       showOutlines,
       config: processingConfig,
       selection: pattern.selection,
-      paths // Pass memoized paths
+      paths, // Pass memoized paths
+      regions,
+      viewMode,
+      highlightColorKey
     })
     if (isEditingStrokeRef.current) {
       incrementDevCounter('pixiRedrawsDuringDrag')
@@ -550,6 +626,9 @@ interface RenderOptions {
   config: ProcessingConfig
   selection: SelectionArtifact | null
   paths: any[]
+  regions?: PatternRegion[]
+  viewMode?: 'Regions' | 'Grid'
+  highlightColorKey?: string | null
 }
 
 function renderPattern(
@@ -574,9 +653,87 @@ function renderPattern(
   // 2. Main Rendering Path
   if (activeTab === 'finished') {
     renderFinishedPreview(PIXI, viewport, pattern, options, fabricIndices)
+  } else if (options.viewMode === 'Regions') {
+    renderRegionView(PIXI, viewport, pattern, options)
   } else {
     renderPatternPreview(PIXI, viewport, pattern, options)
   }
+}
+
+function renderRegionView(
+  PIXI: typeof PIXINamespace,
+  viewport: Viewport,
+  pattern: Pattern,
+  options: RenderOptions
+) {
+  const { regions, highlightColorKey, showOutlines, showLabels } = options
+  if (!regions || regions.length === 0) {
+    // Fallback to pattern preview if no regions yet
+    renderPatternPreview(PIXI, viewport, pattern, options)
+    return
+  }
+
+  const cellSize = VIEWER.CELL_SIZE
+  const isHighlighting = !!highlightColorKey
+
+  regions.forEach((region) => {
+    const isTarget = isHighlighting && region.colorKey === highlightColorKey
+    const color = parseInt(region.hex.slice(1), 16)
+
+    // Draw Fill (subtle tint if highlighted)
+    if (isTarget) {
+      const fill = new PIXI.Graphics()
+      region.loops.forEach((loop) => {
+        fill.poly(loop.map((p) => ({ x: p.x * cellSize, y: p.y * cellSize })))
+      })
+      fill.fill({ color, alpha: 0.15 })
+      viewport.addChild(fill)
+    }
+
+    // Draw Contours
+    if (showOutlines || isTarget) {
+      const g = new PIXI.Graphics()
+      const strokeWidth = isTarget ? 2.5 : 1.0
+      const strokeColor = isTarget ? 0x000000 : 0x000000
+      const strokeAlpha = isTarget ? 0.9 : (isHighlighting ? 0.15 : 0.4)
+
+      region.loops.forEach((loop) => {
+        g.poly(loop.map((p) => ({ x: p.x * cellSize, y: p.y * cellSize })))
+      })
+      g.setStrokeStyle({ width: strokeWidth, color: strokeColor, alpha: strokeAlpha })
+      g.stroke()
+
+      // Add interactivity for hover
+      g.interactive = true
+      g.on('pointerover', () => {
+        g.tint = 0x666666
+      })
+      g.on('pointerout', () => {
+        g.tint = 0xffffff
+      })
+
+      viewport.addChild(g)
+    }
+
+    // Draw Label
+    if (showLabels && (region.area > 4 || isTarget)) {
+      const labelAlpha = isHighlighting ? (isTarget ? 1.0 : 0.1) : 0.7
+      const label = new PIXI.Text({
+        text: (region.colorIndex + 1).toString(),
+        style: {
+          fontFamily: 'Arial',
+          fontSize: Math.max(7, cellSize * 0.45),
+          fill: 0x000000,
+          align: 'center',
+          fontWeight: isTarget ? 'bold' : 'normal'
+        }
+      })
+      label.alpha = labelAlpha
+      label.anchor.set(0.5)
+      label.position.set(region.centroidX * cellSize, region.centroidY * cellSize)
+      viewport.addChild(label)
+    }
+  })
 }
 
 function renderFinishedPreview(

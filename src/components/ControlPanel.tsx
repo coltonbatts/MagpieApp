@@ -4,11 +4,11 @@ import { useUIStore } from '@/store/ui-store'
 import { ExportMenu } from './ExportMenu'
 import { FabricPanel } from './FabricPanel'
 import { useState } from 'react'
-import { Button, Input, Panel } from './ui'
+import { Button, Input, Panel, SegmentedControl } from './ui'
 
 export function ControlPanel() {
   const { processingConfig, isProcessing, error, setProcessingConfig } = usePatternStore()
-  const { workflowStage, setWorkflowStage } = useUIStore()
+  const { workflowStage, setWorkflowStage, viewMode, setViewMode } = useUIStore()
   const [showAdvanced, setShowAdvanced] = useState(false)
 
   // Derived "Organic Detail" value (0..1)
@@ -36,6 +36,23 @@ export function ControlPanel() {
 
           <div className="space-y-5">
             <FabricPanel />
+
+            <Panel
+              title={
+                <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
+                  View Mode
+                </span>
+              }
+            >
+              <SegmentedControl
+                value={viewMode}
+                onValueChange={(val) => setViewMode(val as 'Regions' | 'Grid')}
+                options={[
+                  { value: 'Regions', label: 'Regions' },
+                  { value: 'Grid', label: 'Grid' }
+                ]}
+              />
+            </Panel>
 
             <Panel
               title={

@@ -1,6 +1,7 @@
 mod embroidery;
 mod pdf_export;
 mod selection;
+mod regions;
 
 use embroidery::{process_pattern, process_pattern_from_path, PatternResult, ProcessingConfig};
 use selection::{init_workspace, magic_wand_click, refine_mask, MagicWandParams, RefinementParams};
@@ -222,6 +223,11 @@ fn refine_selection(
     Ok(refine_mask(&mask, width, height, &params))
 }
 
+#[tauri::command]
+fn compute_pattern_regions(payload: regions::RegionExtractionPayload) -> Result<Vec<regions::PatternRegion>, String> {
+    regions::extract_regions(&payload)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -239,6 +245,7 @@ pub fn run() {
             init_selection_workspace,
             magic_wand_click_command,
             refine_selection,
+            compute_pattern_regions,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {
