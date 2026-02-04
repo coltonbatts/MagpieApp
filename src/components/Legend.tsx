@@ -24,6 +24,15 @@ export function Legend() {
 
   return (
     <Panel variant="inset" className="h-full">
+      {highlightColorKey && (
+        <button
+          type="button"
+          onClick={() => setHighlightColorKey(null)}
+          className="mb-2 w-full rounded-md border border-border bg-surface-2 px-2 py-1.5 text-xs font-medium text-fg-muted transition-colors hover:bg-surface-2/80 hover:text-fg"
+        >
+          Clear highlight (Esc)
+        </button>
+      )}
       <div className="max-h-[calc(100vh-16rem)] overflow-y-auto pr-1">
         {legend.map((entry, index) => {
           const coveragePercent = (entry.coverage * 100).toFixed(1)

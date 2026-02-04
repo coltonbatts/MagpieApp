@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
+use std::sync::{Mutex, OnceLock};
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct GridPoint {
@@ -47,6 +48,43 @@ pub struct RegionLegendEntry {
 }
 
 const NO_REGION: usize = usize::MAX;
+const REGION_CACHE_LIMIT: usize = 12;
+
+#[derive(Default)]
+struct RegionCache {
+    by_hash: HashMap<u64, Vec<PatternRegion>>,
+    order: VecDeque<u64>,
+}
+
+static REGION_CACHE: OnceLock<Mutex<RegionCache>> = OnceLock::new();
+
+pub fn extract_regions_cached(payload: &RegionExtractionPayload) -> Result<Vec<PatternRegion>, String> {
+    let payload_hash = hash_region_payload(payload);
+    let cache = REGION_CACHE.get_or_init(|| Mutex::new(RegionCache::default()));
+
+    if let Ok(guard) = cache.lock() {
+        if let Some(cached) = guard.by_hash.get(&payload_hash) {
+            return Ok(cached.clone());
+        }
+    }
+
+    let regions = extract_regions(payload)?;
+
+    if let Ok(mut guard) = cache.lock() {
+        if !guard.by_hash.contains_key(&payload_hash) {
+            guard.order.push_back(payload_hash);
+        }
+        guard.by_hash.insert(payload_hash, regions.clone());
+
+        while guard.order.len() > REGION_CACHE_LIMIT {
+            if let Some(stale_key) = guard.order.pop_front() {
+                guard.by_hash.remove(&stale_key);
+            }
+        }
+    }
+
+    Ok(regions)
+}
 
 pub fn extract_regions(payload: &RegionExtractionPayload) -> Result<Vec<PatternRegion>, String> {
     let width = payload.width as usize;
@@ -444,4 +482,48 @@ pub fn color_key(code: &str, hex: &str) -> String {
 
 pub fn is_fabric_code(code: &str) -> bool {
     code.eq_ignore_ascii_case("fabric")
+}
+
+fn hash_region_payload(payload: &RegionExtractionPayload) -> u64 {
+    // Deterministic FNV-1a hash so cache keys are stable across calls/processes.
+    let mut hash = 0xcbf29ce484222325u64;
+
+    hash = fnv1a_u32(hash, payload.width);
+    hash = fnv1a_u32(hash, payload.height);
+    hash = fnv1a_u64(hash, payload.stitches.len() as u64);
+    for stitch in &payload.stitches {
+        hash = fnv1a_u32(hash, stitch.x);
+        hash = fnv1a_u32(hash, stitch.y);
+        hash = fnv1a_str(hash, &stitch.dmc_code);
+        hash = fnv1a_str(hash, &stitch.hex);
+    }
+
+    hash = fnv1a_u64(hash, payload.legend.len() as u64);
+    for legend in &payload.legend {
+        hash = fnv1a_str(hash, &legend.dmc_code);
+        hash = fnv1a_str(hash, &legend.hex);
+    }
+
+    hash
+}
+
+fn fnv1a_u32(hash: u64, value: u32) -> u64 {
+    fnv1a_bytes(hash, &value.to_le_bytes())
+}
+
+fn fnv1a_u64(hash: u64, value: u64) -> u64 {
+    fnv1a_bytes(hash, &value.to_le_bytes())
+}
+
+fn fnv1a_str(hash: u64, value: &str) -> u64 {
+    fnv1a_bytes(hash, value.as_bytes())
+}
+
+fn fnv1a_bytes(mut hash: u64, bytes: &[u8]) -> u64 {
+    const FNV_PRIME: u64 = 0x0000_0100_0000_01B3;
+    for byte in bytes {
+        hash ^= *byte as u64;
+        hash = hash.wrapping_mul(FNV_PRIME);
+    }
+    hash
 }

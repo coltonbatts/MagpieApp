@@ -40,7 +40,7 @@ export function ControlPanel() {
             <Panel
               title={
                 <span className="text-xs font-semibold uppercase tracking-wide text-fg-subtle">
-                  View Mode
+                  View: Regions | Grid
                 </span>
               }
             >

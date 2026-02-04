@@ -1,12 +1,10 @@
 use serde::Deserialize;
-use std::collections::{HashMap, VecDeque};
 use crate::regions::{self, GridPoint, PatternRegion};
 
 const A4_WIDTH_PT: f32 = 595.0;
 const A4_HEIGHT_PT: f32 = 842.0;
 const LETTER_WIDTH_PT: f32 = 612.0;
 const LETTER_HEIGHT_PT: f32 = 792.0;
-const NO_REGION: usize = usize::MAX;
 
 #[derive(Debug, Deserialize, Copy, Clone)]
 #[serde(rename_all = "lowercase")]
@@ -450,69 +448,6 @@ fn extract_outline_regions(payload: &PdfExportPayload) -> Result<Vec<PatternRegi
             .collect(),
     };
     regions::extract_regions(&regions_payload)
-}
-
-// Functions moved to regions.rs
-
-// build_region_loops moved to regions.rs
-
-fn simplify_axis_aligned_loop(mut loop_points: Vec<GridPoint>) -> Vec<GridPoint> {
-    if loop_points.len() < 4 {
-        return loop_points;
-    }
-
-    if loop_points.first() == loop_points.last() {
-        loop_points.pop();
-    }
-
-    let len = loop_points.len();
-    let mut keep = vec![true; len];
-
-    for i in 0..len {
-        let prev = loop_points[(i + len - 1) % len];
-        let curr = loop_points[i];
-        let next = loop_points[(i + 1) % len];
-
-        let collinear_x = prev.x == curr.x && curr.x == next.x;
-        let collinear_y = prev.y == curr.y && curr.y == next.y;
-        if collinear_x || collinear_y {
-            keep[i] = false;
-        }
-    }
-
-    let mut simplified = Vec::new();
-    for (idx, point) in loop_points.iter().enumerate() {
-        if keep[idx] {
-            simplified.push(*point);
-        }
-    }
-
-    if simplified.len() < 3 {
-        return Vec::new();
-    }
-
-    simplified.push(simplified[0]);
-    simplified
-}
-
-fn loop_sort_key(loop_points: &[GridPoint]) -> (i32, i32, usize) {
-    let mut min_x = i32::MAX;
-    let mut min_y = i32::MAX;
-    for point in loop_points {
-        min_x = min_x.min(point.x);
-        min_y = min_y.min(point.y);
-    }
-    (min_y, min_x, loop_points.len())
-}
-
-fn direction_rank(from: GridPoint, to: GridPoint) -> i32 {
-    match (to.x - from.x, to.y - from.y) {
-        (1, 0) => 0,
-        (0, 1) => 1,
-        (-1, 0) => 2,
-        (0, -1) => 3,
-        _ => 4,
-    }
 }
 
 fn build_outline_page(

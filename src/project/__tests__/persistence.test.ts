@@ -18,10 +18,10 @@ describe('project persistence format', () => {
       },
       fabricSetup: {
         type: 'linen',
-        texture: 'natural',
+        textureIntensity: 0.5,
         count: 14,
         color: { r: 245, g: 245, b: 220 },
-        hoop: { presetId: 'round-150', label: 'Round 150mm', shape: 'round', widthMm: 150, heightMm: 150 },
+        hoop: { presetId: 'round-150', label: 'Round 150mm', shape: 'round', widthMm: 150, heightMm: 150, marginMm: 10 },
       },
       referencePlacement: null,
       processingConfig: {
@@ -65,4 +65,3 @@ describe('project persistence format', () => {
     ).toThrow(/version 2 is not supported/i)
   })
 })
-

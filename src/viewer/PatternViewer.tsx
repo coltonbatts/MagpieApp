@@ -14,55 +14,105 @@ import { Button, Select, SegmentedControl, Toggle } from '@/components/ui'
 import { incrementDevCounter } from '@/lib/dev-instrumentation'
 import { PatternRegion } from '@/types'
 
+const REGION_RESULT_CACHE = new Map<string, PatternRegion[]>()
+const REGION_RESULT_CACHE_LIMIT = 16
+
+function cacheRegions(signature: string, regions: PatternRegion[]) {
+  if (!REGION_RESULT_CACHE.has(signature) && REGION_RESULT_CACHE.size >= REGION_RESULT_CACHE_LIMIT) {
+    const firstKey = REGION_RESULT_CACHE.keys().next().value
+    if (firstKey) {
+      REGION_RESULT_CACHE.delete(firstKey)
+    }
+  }
+  REGION_RESULT_CACHE.set(signature, regions)
+}
+
+function fnv1aHashString(seed: number, value: string): number {
+  let hash = seed >>> 0
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i)
+    hash = Math.imul(hash, 0x01000193) >>> 0
+  }
+  return hash >>> 0
+}
+
+function buildPatternRegionSignature(pattern: Pattern): string {
+  let hash = 0x811c9dc5
+  hash = fnv1aHashString(hash, `${pattern.width}x${pattern.height}`)
+  hash = fnv1aHashString(hash, `sel:${pattern.selection?.id ?? 'none'}`)
+  for (const stitch of pattern.stitches) {
+    hash = fnv1aHashString(hash, `${stitch.x},${stitch.y},${stitch.dmcCode},${stitch.hex}`)
+  }
+  return hash.toString(16)
+}
+
+function toRegionPayload(pattern: Pattern) {
+  return {
+    width: pattern.width,
+    height: pattern.height,
+    stitches: pattern.stitches.map((s) => ({
+      x: s.x,
+      y: s.y,
+      dmc_code: s.dmcCode,
+      hex: s.hex,
+    })),
+    legend: pattern.getLegend().map((l) => ({
+      dmc_code: l.dmcCode,
+      hex: l.hex,
+    })),
+  }
+}
+
 function usePatternRegions(pattern: Pattern | null) {
   const [regions, setRegions] = useState<PatternRegion[]>([])
   const [isComputing, setIsComputing] = useState(false)
-  const lastPatternId = useRef<string | null>(null)
+  const inFlightSignature = useRef<string | null>(null)
+  const patternSignature = useMemo(
+    () => (pattern ? buildPatternRegionSignature(pattern) : null),
+    [pattern]
+  )
 
   useEffect(() => {
-    if (!pattern) {
+    if (!pattern || !patternSignature) {
       setRegions([])
+      setIsComputing(false)
       return
     }
 
-    const patternId = `${pattern.width}x${pattern.height}-${pattern.stitches.length}-${pattern.selection?.id || 'no-sel'}`
-    if (lastPatternId.current === patternId) return
-    lastPatternId.current = patternId
+    const cached = REGION_RESULT_CACHE.get(patternSignature)
+    if (cached) {
+      setRegions(cached)
+      setIsComputing(false)
+      return
+    }
+    if (inFlightSignature.current === patternSignature) return
 
     let canceled = false
+    inFlightSignature.current = patternSignature
     setIsComputing(true)
 
-    const payload = {
-      width: pattern.width,
-      height: pattern.height,
-      stitches: pattern.stitches.map(s => ({
-        x: s.x,
-        y: s.y,
-        dmc_code: s.dmcCode,
-        hex: s.hex
-      })),
-      legend: pattern.getLegend().map(l => ({
-        dmc_code: l.dmcCode,
-        hex: l.hex
-      }))
-    }
+    const payload = toRegionPayload(pattern)
 
     invoke<PatternRegion[]>('compute_pattern_regions', { payload })
-      .then(res => {
+      .then((res) => {
         if (!canceled) {
+          cacheRegions(patternSignature, res)
           setRegions(res)
           setIsComputing(false)
+          inFlightSignature.current = null
         }
       })
-      .catch(err => {
+      .catch((err) => {
         console.error('Failed to compute regions:', err)
         if (!canceled) setIsComputing(false)
+        inFlightSignature.current = null
       })
 
     return () => {
       canceled = true
+      inFlightSignature.current = null
     }
-  }, [pattern])
+  }, [pattern, patternSignature])
 
   return { regions, isComputing }
 }
@@ -85,9 +135,10 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
 
   // Local toggles for Pattern Preview
   const { viewMode, setViewMode, highlightColorKey, setHighlightColorKey } = useUIStore()
-  const [showGrid, setShowGrid] = useState(true)
+  const [showGrid, setShowGrid] = useState(false)
   const [showLabels, setShowLabels] = useState(true)
   const [showOutlines, setShowOutlines] = useState(true)
+  const [hoveredRegionId, setHoveredRegionId] = useState<number | null>(null)
 
   // Sync stage to tab
   useEffect(() => {
@@ -98,7 +149,7 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
     } else if (workflowStage === 'Build') {
       setActiveTab('pattern')
       setViewMode('Regions')
-      setShowGrid(true)
+      setShowGrid(false)
     } else {
       setActiveTab('finished')
       setShowGrid(true)
@@ -136,6 +187,17 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
     [pattern, processingConfig]
   )
   const { regions } = usePatternRegions(pattern)
+
+  useEffect(() => {
+    if (!regions.length) {
+      setHoveredRegionId(null)
+      return
+    }
+    if (hoveredRegionId === null) return
+    if (!regions.some((region) => region.id === hoveredRegionId)) {
+      setHoveredRegionId(null)
+    }
+  }, [regions, hoveredRegionId])
 
   const paths = useMemo(() => {
     if (!pattern || !pattern.labels || !pattern.paletteHex) return []
@@ -451,7 +513,10 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
       paths, // Pass memoized paths
       regions,
       viewMode,
-      highlightColorKey
+      highlightColorKey,
+      hoveredRegionId,
+      onRegionHover: setHoveredRegionId,
+      onClearHighlight: () => setHighlightColorKey(null),
     })
     if (isEditingStrokeRef.current) {
       incrementDevCounter('pixiRedrawsDuringDrag')
@@ -460,7 +525,22 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
       fitViewportToWorld(viewportRef.current, worldWidth, worldHeight)
       hasUserTransformedViewportRef.current = false
     }
-  }, [isReady, pattern, activeTab, showStitchedOnly, showGrid, showLabels, showOutlines, processingConfig])
+  }, [
+    isReady,
+    pattern,
+    activeTab,
+    showStitchedOnly,
+    showGrid,
+    showLabels,
+    showOutlines,
+    processingConfig,
+    paths,
+    regions,
+    viewMode,
+    highlightColorKey,
+    hoveredRegionId,
+    setHighlightColorKey,
+  ])
 
   if (viewerError) {
     return (
@@ -629,6 +709,9 @@ interface RenderOptions {
   regions?: PatternRegion[]
   viewMode?: 'Regions' | 'Grid'
   highlightColorKey?: string | null
+  hoveredRegionId?: number | null
+  onRegionHover?: (regionId: number | null) => void
+  onClearHighlight?: () => void
 }
 
 function renderPattern(
@@ -647,6 +730,13 @@ function renderPattern(
     const bg = new PIXI.Graphics()
     bg.rect(0, 0, pattern.width * cellSize, pattern.height * cellSize)
     bg.fill(fabricColor)
+    if (activeTab === 'pattern') {
+      bg.eventMode = 'static'
+      bg.on('pointertap', () => {
+        options.onClearHighlight?.()
+        options.onRegionHover?.(null)
+      })
+    }
     viewport.addChild(bg)
   }
 
@@ -666,7 +756,14 @@ function renderRegionView(
   pattern: Pattern,
   options: RenderOptions
 ) {
-  const { regions, highlightColorKey, showOutlines, showLabels } = options
+  const {
+    regions,
+    highlightColorKey,
+    showOutlines,
+    showLabels,
+    hoveredRegionId,
+    onRegionHover,
+  } = options
   if (!regions || regions.length === 0) {
     // Fallback to pattern preview if no regions yet
     renderPatternPreview(PIXI, viewport, pattern, options)
@@ -678,55 +775,54 @@ function renderRegionView(
 
   regions.forEach((region) => {
     const isTarget = isHighlighting && region.colorKey === highlightColorKey
+    const isHovered = hoveredRegionId === region.id
     const color = parseInt(region.hex.slice(1), 16)
+    const loopPoints = region.loops.map((loop) => loop.map((p) => ({ x: p.x * cellSize, y: p.y * cellSize })))
+    const dimAlpha = isHighlighting && !isTarget ? 0.12 : 1
 
-    // Draw Fill (subtle tint if highlighted)
-    if (isTarget) {
+    if (isTarget || isHovered) {
       const fill = new PIXI.Graphics()
-      region.loops.forEach((loop) => {
-        fill.poly(loop.map((p) => ({ x: p.x * cellSize, y: p.y * cellSize })))
-      })
-      fill.fill({ color, alpha: 0.15 })
+      for (const loop of loopPoints) {
+        fill.poly(loop)
+      }
+      fill.fill({ color, alpha: isTarget ? 0.16 : 0.08 })
+      fill.alpha = dimAlpha
       viewport.addChild(fill)
     }
 
-    // Draw Contours
-    if (showOutlines || isTarget) {
-      const g = new PIXI.Graphics()
-      const strokeWidth = isTarget ? 2.5 : 1.0
-      const strokeColor = isTarget ? 0x000000 : 0x000000
-      const strokeAlpha = isTarget ? 0.9 : (isHighlighting ? 0.15 : 0.4)
-
-      region.loops.forEach((loop) => {
-        g.poly(loop.map((p) => ({ x: p.x * cellSize, y: p.y * cellSize })))
+    if (showOutlines || isTarget || isHovered) {
+      const outline = new PIXI.Graphics()
+      for (const loop of loopPoints) {
+        outline.poly(loop)
+      }
+      outline.setStrokeStyle({
+        width: isTarget ? 2.25 : isHovered ? 1.8 : 0.85,
+        color: isTarget ? 0x111827 : 0x9ca3af,
+        alpha: isTarget ? 0.9 : isHovered ? 0.7 : 0.5,
       })
-      g.setStrokeStyle({ width: strokeWidth, color: strokeColor, alpha: strokeAlpha })
-      g.stroke()
-
-      // Add interactivity for hover
-      g.interactive = true
-      g.on('pointerover', () => {
-        g.tint = 0x666666
+      outline.stroke()
+      outline.alpha = dimAlpha
+      outline.eventMode = 'static'
+      outline.cursor = 'pointer'
+      outline.on('pointerover', () => onRegionHover?.(region.id))
+      outline.on('pointerout', () => onRegionHover?.(null))
+      outline.on('pointertap', (event: any) => {
+        event.stopPropagation?.()
       })
-      g.on('pointerout', () => {
-        g.tint = 0xffffff
-      })
-
-      viewport.addChild(g)
+      viewport.addChild(outline)
     }
 
-    // Draw Label
     if (showLabels && (region.area > 4 || isTarget)) {
-      const labelAlpha = isHighlighting ? (isTarget ? 1.0 : 0.1) : 0.7
+      const labelAlpha = isHighlighting ? (isTarget ? 1 : 0.08) : 0.75
       const label = new PIXI.Text({
         text: (region.colorIndex + 1).toString(),
         style: {
-          fontFamily: 'Arial',
+          fontFamily: 'Menlo, Monaco, monospace',
           fontSize: Math.max(7, cellSize * 0.45),
           fill: 0x000000,
           align: 'center',
-          fontWeight: isTarget ? 'bold' : 'normal'
-        }
+          fontWeight: isTarget || isHovered ? 'bold' : 'normal',
+        },
       })
       label.alpha = labelAlpha
       label.anchor.set(0.5)

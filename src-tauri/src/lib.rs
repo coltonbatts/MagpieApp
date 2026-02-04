@@ -225,7 +225,7 @@ fn refine_selection(
 
 #[tauri::command]
 fn compute_pattern_regions(payload: regions::RegionExtractionPayload) -> Result<Vec<regions::PatternRegion>, String> {
-    regions::extract_regions(&payload)
+    regions::extract_regions_cached(&payload)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
