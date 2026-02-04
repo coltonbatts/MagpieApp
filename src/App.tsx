@@ -2,9 +2,15 @@ import { useEffect, useState } from 'react'
 import { SelectionArtifactModel } from './model/SelectionArtifact'
 import { usePatternStore } from './store/pattern-store'
 import { useUIStore } from './store/ui-store'
+import { useProjectHubStore } from './store/project-hub-store'
 import { DMCTester } from './components/DMCTester'
 import { logNormalizedImageDebug, logPatternPaletteDebug } from './processing/debug-color'
 import { runPatternColorSanityTest } from './model/pattern-color.sanity'
+import { getPlatformAdapter } from './platform'
+import { normalizeImage, normalizeImageCapped } from './processing/image-utils'
+import { HomeHub } from './components/project-hub/HomeHub'
+import { captureProjectState, hydrateProjectFromDocument, loadProject, saveProject } from './project-hub/api'
+import type { ProjectDocument } from './project-hub/types'
 
 import { WorkflowStepper } from './components/workflow/WorkflowStepper'
 import { FabricStage } from './components/workflow/FabricStage'
@@ -19,7 +25,18 @@ import { incrementDevCounter } from './lib/dev-instrumentation'
 export default function App() {
   const { normalizedImage, referenceId, selection, processingConfig, setPattern, isProcessing, setIsProcessing } = usePatternStore()
   const { workflowStage } = useUIStore()
+  const {
+    currentProjectId,
+    currentProjectName,
+    referenceImagePath,
+    createdDate,
+    isHubVisible,
+    setHubVisible,
+    setCurrentProject,
+  } = useProjectHubStore()
   const [showDMCTester, setShowDMCTester] = useState(false)
+  const [saveError, setSaveError] = useState<string | null>(null)
+  const [isSavingProject, setIsSavingProject] = useState(false)
   const isDev = import.meta.env.DEV
   useEffect(() => {
     if (!isDev) return
@@ -83,6 +100,84 @@ export default function App() {
     isDev
   ])
 
+  async function handleCreateProject({
+    projectName,
+    referenceImagePath: nextReferencePath,
+  }: {
+    projectName: string
+    referenceImagePath: string
+  }) {
+    const platform = await getPlatformAdapter()
+    const imageBytes = await platform.readFile(nextReferencePath)
+    const blobBytes = new Uint8Array(imageBytes)
+    const sourceBlob = new Blob([blobBytes], { type: guessMimeType(nextReferencePath) })
+    const sourceBitmap = await createImageBitmap(sourceBlob)
+    const buildImage = normalizeImage(sourceBitmap, processingConfig.targetSize)
+    const selectionImage = normalizeImageCapped(
+      sourceBitmap,
+      processingConfig.selectionWorkingSize,
+      processingConfig.selectionMaxMegapixels
+    )
+
+    const patternStore = usePatternStore.getState()
+    patternStore.setOriginalImage(sourceBitmap)
+    patternStore.setSourceImages(buildImage, selectionImage)
+
+    const now = new Date().toISOString()
+    setCurrentProject({
+      projectId: createProjectId(projectName),
+      projectName,
+      createdDate: now,
+      referenceImagePath: nextReferencePath,
+    })
+    useUIStore.getState().setWorkflowStage('Fabric', { acknowledge: false, source: 'system' })
+    setHubVisible(false)
+  }
+
+  async function handleOpenProject(projectId: string) {
+    const project = await loadProject(projectId)
+    await hydrateProjectFromDocument(project)
+    setCurrentProject({
+      projectId: project.project_id,
+      projectName: project.project_name,
+      createdDate: project.created_date,
+      referenceImagePath: project.reference_image_path,
+    })
+    setHubVisible(false)
+  }
+
+  async function handleSaveProject() {
+    if (!currentProjectId || !currentProjectName || !referenceImagePath) {
+      setSaveError('Create or open a project from Project Hub first.')
+      return
+    }
+    setIsSavingProject(true)
+    setSaveError(null)
+
+    try {
+      const snapshot = captureProjectState()
+      const document: ProjectDocument = {
+        project_id: currentProjectId,
+        project_name: currentProjectName,
+        created_date: createdDate ?? new Date().toISOString(),
+        last_modified: new Date().toISOString(),
+        reference_image_path: referenceImagePath,
+        settings: {
+          pixel_size: processingConfig.targetSize,
+          color_count: processingConfig.colorCount,
+          floss_brand: processingConfig.useDmcPalette ? 'DMC' : 'Custom',
+        },
+        state: snapshot,
+        thumbnail_path: null,
+      }
+      await saveProject(document)
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : 'Project save failed.')
+    } finally {
+      setIsSavingProject(false)
+    }
+  }
+
   if (isDev && showDMCTester) {
     return (
       <div className="min-h-screen bg-gray-50">
@@ -100,6 +195,10 @@ export default function App() {
         </div>
       </div>
     )
+  }
+
+  if (isHubVisible) {
+    return <HomeHub onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} />
   }
 
   const renderStage = () => {
@@ -131,6 +230,28 @@ export default function App() {
         </div>
       )}
       <WorkflowStepper />
+      <div className="absolute right-4 top-4 z-[110] flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setHubVisible(true)}
+          className="rounded-md border border-border bg-surface px-3 py-2 text-xs font-bold uppercase tracking-wide text-fg hover:bg-surface-2"
+        >
+          Project Hub
+        </button>
+        <button
+          type="button"
+          onClick={() => void handleSaveProject()}
+          disabled={isSavingProject}
+          className="rounded-md border border-border-strong bg-accent-soft px-3 py-2 text-xs font-bold uppercase tracking-wide text-fg disabled:opacity-50"
+        >
+          {isSavingProject ? 'Saving...' : 'Save Project'}
+        </button>
+      </div>
+      {saveError && (
+        <div className="absolute left-1/2 top-16 z-[110] -translate-x-1/2 rounded-md border border-red-300 bg-red-50 px-4 py-2 text-xs text-red-700">
+          {saveError}
+        </div>
+      )}
 
       <main className="flex-1 relative overflow-hidden">
         {isDev && (
@@ -158,4 +279,23 @@ function countSelectedPixels(mask: Uint8Array): number {
     if (mask[i] > 0) selected += 1
   }
   return selected
+}
+
+function createProjectId(projectName: string): string {
+  const slug = projectName
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+  const token = Math.random().toString(36).slice(2, 8)
+  return `${slug || 'project'}-${token}`
+}
+
+function guessMimeType(path: string): string {
+  const lower = path.toLowerCase()
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg'
+  if (lower.endsWith('.webp')) return 'image/webp'
+  if (lower.endsWith('.bmp')) return 'image/bmp'
+  if (lower.endsWith('.gif')) return 'image/gif'
+  return 'image/png'
 }

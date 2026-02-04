@@ -1,15 +1,20 @@
 mod embroidery;
 mod pdf_export;
-mod selection;
+mod project_hub;
 mod regions;
+mod selection;
 
 use embroidery::{process_pattern, process_pattern_from_path, PatternResult, ProcessingConfig};
-use selection::{init_workspace, magic_wand_click, refine_mask, MagicWandParams, RefinementParams};
 use pdf_export::PdfExportPayload;
+use project_hub::commands::{
+    get_all_projects, init_project_hub, load_project, save_project, ProjectStoreLock,
+};
 use rfd::FileDialog;
+use selection::{init_workspace, magic_wand_click, refine_mask, MagicWandParams, RefinementParams};
 use serde::Deserialize;
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Deserialize)]
@@ -224,13 +229,16 @@ fn refine_selection(
 }
 
 #[tauri::command]
-fn compute_pattern_regions(payload: regions::RegionExtractionPayload) -> Result<Vec<regions::PatternRegion>, String> {
+fn compute_pattern_regions(
+    payload: regions::RegionExtractionPayload,
+) -> Result<Vec<regions::PatternRegion>, String> {
     regions::extract_regions_cached(&payload)
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(ProjectStoreLock(Mutex::new(())))
         .invoke_handler(tauri::generate_handler![
             desktop_select_save_path,
             desktop_select_open_path,
@@ -246,8 +254,12 @@ pub fn run() {
             magic_wand_click_command,
             refine_selection,
             compute_pattern_regions,
+            get_all_projects,
+            save_project,
+            load_project,
         ])
         .setup(|app| {
+            init_project_hub(&app.handle())?;
             if cfg!(debug_assertions) {
                 app.handle().plugin(
                     tauri_plugin_log::Builder::default()
