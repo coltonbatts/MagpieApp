@@ -1,56 +1,85 @@
 # MagpieApp
 
-Vite + React + TypeScript + Tailwind + Pixi app for generating stitch patterns and exporting PNG.
+**The Artisan's Blueprint for Modern Embroidery.**
 
-## Quick Runbook
+MagpieApp is a professional-grade embroidery design suite built for precision and performance. It transforms images into high-fidelity "Artisan Blueprints"—technical patterns designed for modern hand-embroidery.
+
+---
+
+## 🏗️ The Assembly Line
+
+MagpieApp follows a structured, 5-stage workflow designed for clarity and creative control:
+
+1. **Fabric Stage**
+   Define your canvas. Select your hoop size and fabric type to ground your project in physical dimensions.
+
+2. **Reference Stage**
+   Direct manipulation interface. Click and drag to position your reference image within the hoop. Precision alignment for the foundation of your work.
+
+3. **Select Stage (The Mask)**
+   Artist-friendly masking. Use the intelligent **Magic Wand** tool to select exactly which areas of your image should be stitched. Separate the subject from the background with surgical precision.
+
+4. **Build Stage**
+   High-performance pattern generation. Watch as your image is quantized into DMC thread colors and organized into interactive regions.
+   - **Region-based Rendering**: A "paint-by-numbers" style interface for visual clarity.
+   - **Dynamic Legend**: Interact with thread palettes to highlight specific regions.
+
+5. **Export Stage**
+   Distribute your masterpiece. Generate professional **Artisan Blueprint PDFs** and high-fidelity SVGs. Includes a Swiss-modernist style Thread Manifest for project management.
+
+---
+
+## ⚡ Technical Excellence
+
+MagpieApp is built on a high-performance native foundation:
+
+- **Tauri 2 + Rust Core**: A robust desktop shell with a native Rust backend for heavy lifting.
+- **Native Processing Pipeline**: Pattern generation is handled by specialized Rust modules (`embroidery.rs`, `regions.rs`) leveraging `rayon` for massive parallelism.
+- **Color Science**: Uses `CIEDE2000` color difference formulas for industry-leading DMC thread matching.
+- **Pixi.js Renderer**: WebGL-accelerated rendering capable of handling complex vector regions and high-count stitch grids with fluid performance.
+- **Editorial Modernism**: A UI aesthetic inspired by Swiss design—clean, authoritative, and minimalist.
+
+---
+
+## 🚀 Getting Started
 
 ### Prerequisites
 
-- Node.js **18+** (recommended; this repo does not pin a stricter engine)
+- **Node.js 18+**
+- **Rust Toolchain** (for Desktop development)
+- **Tauri Dependencies** (see [Tauri Setup Guide](https://tauri.app/v2/guides/getting-started/prerequisites/))
 
-### Install
+### Installation
 
 ```bash
 npm install
 ```
 
-### Native Desktop App (Recommended for Performance)
+### Development
 
-This app includes a native Rust backend for high-performance pattern processing.
+#### Native Desktop (Recommended)
+
+The desktop version leverages the full power of the Rust processing pipeline.
 
 ```bash
 npm run desktop:dev
 ```
 
-- Requires **Rust** and **Tauri** dependencies installed on your system.
-- Leverages `rayon` for parallel processing and `CIEDE2000` for color matching.
-- UI includes a "Processing Pattern..." indicator during native computation.
+#### Web Fallback
 
-### Local Web Development (Fallback)
+A high-compatibility web version using JavaScript processing.
 
 ```bash
 npm run start
 ```
 
-- Runs in the browser with JavaScript processing.
-- Automatically falls back to JS if not running in the Tauri environment.
+---
 
-## Pattern Viewer vs Dev-only tools
+## 📦 Build & Distribution
 
-- **Pattern Viewer** is the default app screen.
-- In dev mode, a top-right button **"Test DMC Matcher"** opens the dev-only DMC tester.
-- Use **"Switch to Pattern Viewer"** to return from DMC test mode.
+- **Desktop App**: `npm run desktop:build`
+- **Web App**: `npm run build`
 
-## Export PNG smoke test
+---
 
-1. Start the app (`npm run start`) and open `http://localhost:5173`.
-2. In the control panel, click **Upload image** and select any JPG/PNG/WEBP.
-3. Wait for normalization text (`Normalized to ... px`) and pattern render.
-4. Click **Export PNG**.
-5. Confirm the file appears in your browser's Downloads location.
-6. Verify filename:
-   - Raw palette mode: `magpie-pattern-raw.png`
-   - DMC palette mode (toggle **Map palette to DMC thread colors**): `magpie-pattern-dmc.png`
-7. In dev mode, verify checksum line appears under Export:
-   - Format: `Export checksum: <width>x<height> | stitch <N>px | palette <count> | mode <raw|dmc>`
-8. If no pattern is loaded, Export is disabled and shows: **"Load an image/pattern first."**
+*MagpieApp — Designed for the meticulous artisan.*

@@ -164,3 +164,60 @@
 .stage-shell--export {
   animation: stage-enter-export 260ms var(--ease-standard);
 }
+
+@keyframes mascot-blink {
+  0%,
+  45%,
+  47%,
+  100% {
+    transform: scaleY(1);
+  }
+
+  46% {
+    transform: scaleY(0.12);
+  }
+}
+
+.magpie-mascot {
+  position: fixed;
+  left: 1rem;
+  bottom: 1rem;
+  z-index: 85;
+  pointer-events: none;
+}
+
+.magpie-mascot__face {
+  display: flex;
+  gap: 0.5rem;
+  border: 1px solid rgb(var(--border));
+  border-radius: 999px;
+  background: rgb(var(--surface) / 0.9);
+  padding: 0.45rem 0.55rem;
+  box-shadow: var(--shadow-md);
+  backdrop-filter: blur(3px);
+}
+
+.magpie-mascot__eye {
+  width: 1.35rem;
+  height: 1.35rem;
+  border-radius: 999px;
+  background: rgb(var(--surface-2));
+  border: 1px solid rgb(var(--border-strong));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: mascot-blink 7.5s ease-in-out infinite;
+  transform-origin: center;
+}
+
+.magpie-mascot__eye--delay {
+  animation-delay: 0.2s;
+}
+
+.magpie-mascot__pupil {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 999px;
+  background: rgb(var(--fg));
+  transition: transform 70ms linear;
+}

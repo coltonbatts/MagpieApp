@@ -17,6 +17,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::menu::{MenuBuilder, MenuId, MenuItemBuilder, SubmenuBuilder};
+use tauri::Manager;
 
 #[derive(Deserialize)]
 struct DialogFilter {
@@ -259,6 +261,9 @@ async fn process_image(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    const MENU_RELOAD: &str = "view.reload";
+    const MENU_RELAUNCH: &str = "view.relaunch";
+
     tauri::Builder::default()
         .manage(ProjectStoreLock(Mutex::new(())))
         .invoke_handler(tauri::generate_handler![
@@ -282,6 +287,20 @@ pub fn run() {
             load_project,
         ])
         .setup(|app| {
+            let reload_item = MenuItemBuilder::with_id(MenuId::new(MENU_RELOAD), "Reload Window")
+                .accelerator("CmdOrCtrl+R")
+                .build(app)?;
+            let relaunch_item = MenuItemBuilder::with_id(MenuId::new(MENU_RELAUNCH), "Relaunch App")
+                .accelerator("CmdOrCtrl+Shift+R")
+                .build(app)?;
+
+            let view_menu = SubmenuBuilder::new(app, "View")
+                .item(&reload_item)
+                .item(&relaunch_item)
+                .build()?;
+            let menu = MenuBuilder::new(app).item(&view_menu).build()?;
+            app.set_menu(menu)?;
+
             init_project_hub(&app.handle())?;
             if cfg!(debug_assertions) {
                 app.handle().plugin(
@@ -291,6 +310,17 @@ pub fn run() {
                 )?;
             }
             Ok(())
+        })
+        .on_menu_event(|app, event| match event.id().as_ref() {
+            MENU_RELOAD => {
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.eval("window.location.reload()");
+                }
+            }
+            MENU_RELAUNCH => {
+                app.restart();
+            }
+            _ => {}
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

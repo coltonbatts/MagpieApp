@@ -19,6 +19,7 @@ import { SelectStage } from './components/workflow/SelectStage'
 import { BuildStage } from './components/workflow/BuildStage'
 import { ExportStage } from './components/workflow/ExportStage'
 import { StageTransitionLayer } from './components/workflow/StageTransitionLayer'
+import { MascotEyes } from './components/MascotEyes'
 import { processPattern } from './processing/process-pattern'
 import { incrementDevCounter } from './lib/dev-instrumentation'
 
@@ -269,6 +270,7 @@ export default function App() {
           {renderStage()}
         </div>
       </main>
+      <MascotEyes />
     </div>
   )
 }
