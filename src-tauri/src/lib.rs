@@ -1,3 +1,6 @@
+mod embroidery;
+
+use embroidery::{process_pattern, process_pattern_from_path, PatternResult, ProcessingConfig};
 use rfd::FileDialog;
 use serde::Deserialize;
 use std::fs;
@@ -64,6 +67,74 @@ fn desktop_open_in_folder(path: String) -> Result<(), String> {
     opener::open(target).map_err(|err| err.to_string())
 }
 
+/// Process an image into an embroidery pattern using native Rust performance.
+///
+/// This command offloads heavy computation from the browser:
+/// - Image decoding and color space conversion
+/// - K-means color quantization (parallelized with rayon)
+/// - DMC thread color matching using CIEDE2000 Delta-E algorithm
+///
+/// # Arguments
+/// * `image_bytes` - Raw image bytes (PNG, JPEG, etc.)
+/// * `config` - Processing configuration (color count, DMC mapping, etc.)
+/// * `mask` - Optional mask bytes (255 = include, 0 = exclude/fabric)
+///
+/// # Returns
+/// PatternResult containing stitches, palette, legend, and processing time
+#[tauri::command]
+fn process_embroidery_pattern(
+    image_bytes: Vec<u8>,
+    config: ProcessingConfig,
+    mask: Option<Vec<u8>>,
+) -> Result<PatternResult, String> {
+    log::info!(
+        "Processing embroidery pattern: {} bytes, {} colors, DMC={}",
+        image_bytes.len(),
+        config.color_count,
+        config.use_dmc_palette
+    );
+
+    let mask_slice = mask.as_deref();
+    let result = process_pattern(&image_bytes, &config, mask_slice)?;
+
+    log::info!(
+        "Pattern processed: {}x{}, {} stitches, {} colors, {}ms",
+        result.width,
+        result.height,
+        result.total_stitches,
+        result.palette.len(),
+        result.processing_time_ms
+    );
+
+    Ok(result)
+}
+
+/// Process an image from a file path into an embroidery pattern.
+///
+/// Alternative to process_embroidery_pattern when the image is already on disk.
+#[tauri::command]
+fn process_embroidery_pattern_from_file(
+    file_path: String,
+    config: ProcessingConfig,
+    mask: Option<Vec<u8>>,
+) -> Result<PatternResult, String> {
+    log::info!("Processing embroidery pattern from file: {}", file_path);
+
+    let mask_slice = mask.as_deref();
+    let result = process_pattern_from_path(&file_path, &config, mask_slice)?;
+
+    log::info!(
+        "Pattern processed: {}x{}, {} stitches, {} colors, {}ms",
+        result.width,
+        result.height,
+        result.total_stitches,
+        result.palette.len(),
+        result.processing_time_ms
+    );
+
+    Ok(result)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -72,6 +143,8 @@ pub fn run() {
             desktop_select_folder,
             desktop_write_file,
             desktop_open_in_folder,
+            process_embroidery_pattern,
+            process_embroidery_pattern_from_file,
         ])
         .setup(|app| {
             if cfg!(debug_assertions) {

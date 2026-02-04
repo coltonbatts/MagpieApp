@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react'
 import { ControlPanel } from './components/ControlPanel'
 import { Layout } from './components/Layout'
 import { Legend } from './components/Legend'
-import { Pattern } from './model/Pattern'
 import { SelectionArtifactModel } from './model/SelectionArtifact'
 import { usePatternStore } from './store/pattern-store'
 import { useUIStore } from './store/ui-store'
@@ -15,6 +14,7 @@ import { WorkflowStepper } from './components/workflow/WorkflowStepper'
 import { FabricStage } from './components/workflow/FabricStage'
 import { ReferenceStage } from './components/workflow/ReferenceStage'
 import { SelectStage } from './components/workflow/SelectStage'
+import { processPattern } from './processing/process-pattern'
 
 export default function App() {
   const { pattern, normalizedImage, referenceId, selection, processingConfig, setPattern } = usePatternStore()
@@ -28,30 +28,53 @@ export default function App() {
     runPatternColorSanityTest()
   }, [isDev])
 
+  const [isProcessing, setIsProcessing] = useState(false)
+
   useEffect(() => {
     if (!normalizedImage) return
 
+    let isMounted = true
     const debugColor = isDev && window.localStorage.getItem('magpie:debugColor') === '1'
-    if (debugColor) logNormalizedImageDebug(normalizedImage)
 
-    const selectionForBuildRaw = selection
-      ? SelectionArtifactModel.resampleTo(selection, normalizedImage.width, normalizedImage.height)
-      : null
-    const selectionSelectedCount = selectionForBuildRaw ? countSelectedPixels(selectionForBuildRaw.mask) : 0
-    const selectionForBuild =
-      selectionForBuildRaw && selectionSelectedCount > 0 ? selectionForBuildRaw : null
+    async function updatePattern() {
+      setIsProcessing(true)
+      try {
+        if (debugColor) logNormalizedImageDebug(normalizedImage!)
 
-    const rawPattern = Pattern.fromImageData(normalizedImage, processingConfig, selectionForBuild)
-    if (debugColor) logPatternPaletteDebug(rawPattern)
-    if (isDev && selectionForBuildRaw && selectionSelectedCount === 0) {
-      console.warn('[Magpie][SelectionBridge] Empty build mask detected; falling back to unmasked build render.')
+        const selectionForBuildRaw = selection
+          ? SelectionArtifactModel.resampleTo(selection, normalizedImage!.width, normalizedImage!.height)
+          : null
+        const selectionSelectedCount = selectionForBuildRaw ? countSelectedPixels(selectionForBuildRaw.mask) : 0
+        const selectionForBuild =
+          selectionForBuildRaw && selectionSelectedCount > 0 ? selectionForBuildRaw : null
+
+        if (isDev && selectionForBuildRaw && selectionSelectedCount === 0) {
+          console.warn('[Magpie][SelectionBridge] Empty build mask detected; falling back to unmasked build render.')
+        }
+
+        // Use the unified processing API (automatically uses native on desktop)
+        const { pattern: nextPattern } = await processPattern({
+          image: normalizedImage!,
+          config: processingConfig,
+          selection: selectionForBuild,
+        })
+
+        if (isMounted) {
+          if (debugColor) logPatternPaletteDebug(nextPattern)
+          setPattern(nextPattern)
+        }
+      } catch (err) {
+        console.error('Failed to process pattern:', err)
+      } finally {
+        if (isMounted) setIsProcessing(false)
+      }
     }
 
-    const nextPattern = processingConfig.useDmcPalette
-      ? rawPattern.withDmcPaletteMapping()
-      : rawPattern
+    updatePattern()
 
-    setPattern(nextPattern)
+    return () => {
+      isMounted = false
+    }
   }, [
     normalizedImage,
     referenceId,
@@ -104,6 +127,14 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-white">
+      {isProcessing && (
+        <div className="absolute inset-0 z-[100] bg-white/50 backdrop-blur-sm flex items-center justify-center pointer-events-none">
+          <div className="bg-white px-6 py-4 rounded-xl shadow-2xl border border-gray-100 flex items-center gap-4 animate-in fade-in zoom-in duration-300">
+            <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm font-semibold text-gray-800 tracking-tight">Processing Pattern...</span>
+          </div>
+        </div>
+      )}
       <WorkflowStepper />
 
       <main className="flex-1 relative overflow-hidden">

@@ -25,3 +25,10 @@ tauri = { version = "2.10.0", features = [] }
 tauri-plugin-log = "2"
 rfd = "0.15"
 opener = "0.8"
+
+# Image processing
+image = "0.25"
+rayon = "1.10"
+
+# Color science (CIEDE2000 Delta-E)
+palette = "0.7"

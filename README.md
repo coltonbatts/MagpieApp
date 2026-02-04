@@ -5,37 +5,44 @@ Vite + React + TypeScript + Tailwind + Pixi app for generating stitch patterns a
 ## Quick Runbook
 
 ### Prerequisites
+
 - Node.js **18+** (recommended; this repo does not pin a stricter engine)
 
 ### Install
+
 ```bash
 npm install
 ```
 
-### Local development (fastest for PNG testing)
+### Native Desktop App (Recommended for Performance)
+
+This app includes a native Rust backend for high-performance pattern processing.
+
+```bash
+npm run desktop:dev
+```
+
+- Requires **Rust** and **Tauri** dependencies installed on your system.
+- Leverages `rayon` for parallel processing and `CIEDE2000` for color matching.
+- UI includes a "Processing Pattern..." indicator during native computation.
+
+### Local Web Development (Fallback)
+
 ```bash
 npm run start
 ```
-- `start` is an alias to Vite dev server (`vite`) for the shortest edit/test loop.
-- Default URL: `http://localhost:5173` (or next available port if 5173 is in use).
 
-You can run the same server directly with:
-```bash
-npm run dev
-```
-
-### Production-like check
-```bash
-npm run build && npm run preview
-```
-- Default preview URL: `http://localhost:4173` (or next available port if 4173 is in use).
+- Runs in the browser with JavaScript processing.
+- Automatically falls back to JS if not running in the Tauri environment.
 
 ## Pattern Viewer vs Dev-only tools
+
 - **Pattern Viewer** is the default app screen.
 - In dev mode, a top-right button **"Test DMC Matcher"** opens the dev-only DMC tester.
 - Use **"Switch to Pattern Viewer"** to return from DMC test mode.
 
 ## Export PNG smoke test
+
 1. Start the app (`npm run start`) and open `http://localhost:5173`.
 2. In the control panel, click **Upload image** and select any JPG/PNG/WEBP.
 3. Wait for normalization text (`Normalized to ... px`) and pattern render.
