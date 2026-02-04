@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Button, Select, Input, SegmentedControl } from '@/components/ui'
+import { useEffect, useState, useMemo, useCallback, useRef } from 'react'
+import { Button, Select, SegmentedControl, Slider } from '@/components/ui'
 import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
 import { getPlatformAdapter } from '@/platform'
@@ -10,6 +10,7 @@ import {
   type RecentProjectEntry,
 } from '@/project/persistence'
 import { StudioPreview } from './StudioPreview'
+import type { FabricSetup } from '@/types'
 
 const FABRIC_TYPES = [
   { value: 'linen', label: 'Linen' },
@@ -26,7 +27,18 @@ export function FabricStage() {
   const [isDesktop, setIsDesktop] = useState(false)
   const [isResuming, setIsResuming] = useState(false)
 
-  // Local HSL for smooth sliders
+  // Local state for instant preview updates during dragging
+  const [localFabricSetup, setLocalFabricSetup] = useState<FabricSetup>(fabricSetup)
+  const isDraggingRef = useRef(false)
+  
+  // Sync local state when store updates (but not during drag)
+  useEffect(() => {
+    if (!isDraggingRef.current) {
+      setLocalFabricSetup(fabricSetup)
+    }
+  }, [fabricSetup])
+
+  // Local HSL for smooth color sliders
   const [hsl, setHsl] = useState(() =>
     rgbToHsl(fabricSetup.color.r, fabricSetup.color.g, fabricSetup.color.b)
   )
@@ -42,20 +54,75 @@ export function FabricStage() {
     return () => { mounted = false }
   }, [])
 
-  const handleRgbChange = (hex: string) => {
+  // Instant preview update (local state only)
+  const updateLocalFabricSetup = useCallback((updates: Partial<FabricSetup>) => {
+    isDraggingRef.current = true
+    setLocalFabricSetup((prev) => ({
+      ...prev,
+      ...updates,
+      hoop: {
+        ...prev.hoop,
+        ...(updates.hoop ?? {}),
+      },
+    }))
+  }, [])
+
+  // Commit to store (called on mouse up)
+  const commitFabricSetup = useCallback((updates: Partial<FabricSetup>) => {
+    isDraggingRef.current = false
+    setFabricSetup(updates)
+  }, [setFabricSetup])
+  
+  // Commit all local state to store (called before stage transition)
+  const handleConfirmCanvas = useCallback(() => {
+    // Ensure we're not dragging
+    isDraggingRef.current = false
+    
+    // Commit any pending HSL changes first
+    const rgb = hslToRgb(hsl.h, hsl.s, hsl.l)
+    const finalFabricSetup = {
+      ...localFabricSetup,
+      color: rgb,
+    }
+    
+    // Commit all local state changes
+    setFabricSetup(finalFabricSetup)
+    
+    // Small delay to ensure state is committed before transition
+    requestAnimationFrame(() => {
+      setWorkflowStage('Reference')
+    })
+  }, [localFabricSetup, hsl, setFabricSetup, setWorkflowStage])
+
+  const handleRgbChange = useCallback((hex: string) => {
     const r = parseInt(hex.slice(1, 3), 16)
     const g = parseInt(hex.slice(3, 5), 16)
     const b = parseInt(hex.slice(5, 7), 16)
-    setFabricSetup({ color: { r, g, b } })
-    setHsl(rgbToHsl(r, g, b))
-  }
+    const newColor = { r, g, b }
+    const newHsl = rgbToHsl(r, g, b)
+    updateLocalFabricSetup({ color: newColor })
+    commitFabricSetup({ color: newColor })
+    setHsl(newHsl)
+  }, [updateLocalFabricSetup, commitFabricSetup])
+  
+  // Sync HSL when fabricSetup.color changes externally
+  useEffect(() => {
+    const newHsl = rgbToHsl(fabricSetup.color.r, fabricSetup.color.g, fabricSetup.color.b)
+    setHsl(newHsl)
+  }, [fabricSetup.color.r, fabricSetup.color.g, fabricSetup.color.b])
 
-  const handleHslChange = (changes: Partial<{ h: number, s: number, l: number }>) => {
+  const handleHslChange = useCallback((changes: Partial<{ h: number, s: number, l: number }>) => {
     const nextHsl = { ...hsl, ...changes }
     setHsl(nextHsl)
     const rgb = hslToRgb(nextHsl.h, nextHsl.s, nextHsl.l)
-    setFabricSetup({ color: rgb })
-  }
+    updateLocalFabricSetup({ color: rgb })
+  }, [hsl, updateLocalFabricSetup])
+
+  const handleHslCommit = useCallback((changes: Partial<{ h: number, s: number, l: number }>) => {
+    const nextHsl = { ...hsl, ...changes }
+    const rgb = hslToRgb(nextHsl.h, nextHsl.s, nextHsl.l)
+    commitFabricSetup({ color: rgb })
+  }, [hsl, commitFabricSetup])
 
   const handleProjectOpen = async (path: string) => {
     setIsResuming(true)
@@ -66,7 +133,10 @@ export function FabricStage() {
     }
   }
 
-  const hexColor = `#${fabricSetup.color.r.toString(16).padStart(2, '0')}${fabricSetup.color.g.toString(16).padStart(2, '0')}${fabricSetup.color.b.toString(16).padStart(2, '0')}`
+  const hexColor = useMemo(
+    () => `#${localFabricSetup.color.r.toString(16).padStart(2, '0')}${localFabricSetup.color.g.toString(16).padStart(2, '0')}${localFabricSetup.color.b.toString(16).padStart(2, '0')}`,
+    [localFabricSetup.color]
+  )
 
   return (
     <div className="flex h-full w-full overflow-hidden bg-bg">
@@ -105,38 +175,55 @@ export function FabricStage() {
                 </div>
 
                 <div className="space-y-4 pt-1">
-                  <HSLSlider label="Hue" min={0} max={360} value={hsl.h} onChange={(v) => handleHslChange({ h: v })} />
-                  <HSLSlider label="Saturation" min={0} max={100} value={hsl.s} onChange={(v) => handleHslChange({ s: v })} />
-                  <HSLSlider label="Lightness" min={0} max={100} value={hsl.l} onChange={(v) => handleHslChange({ l: v })} />
+                  <HSLSlider 
+                    label="Hue" 
+                    min={0} 
+                    max={360} 
+                    value={hsl.h} 
+                    onChange={(v) => handleHslChange({ h: v })} 
+                    onChangeCommit={(v) => handleHslCommit({ h: v })} 
+                  />
+                  <HSLSlider 
+                    label="Saturation" 
+                    min={0} 
+                    max={100} 
+                    value={hsl.s} 
+                    onChange={(v) => handleHslChange({ s: v })} 
+                    onChangeCommit={(v) => handleHslCommit({ s: v })} 
+                  />
+                  <HSLSlider 
+                    label="Lightness" 
+                    min={0} 
+                    max={100} 
+                    value={hsl.l} 
+                    onChange={(v) => handleHslChange({ l: v })} 
+                    onChangeCommit={(v) => handleHslCommit({ l: v })} 
+                  />
                 </div>
               </div>
 
               <div className="space-y-5 pt-4 border-t border-border/50">
-                <div className="space-y-2.5">
-                  <div className="flex justify-between">
-                    <span className="text-xs font-medium text-fg-muted">Texture Intensity</span>
-                    <span className="text-[10px] font-mono text-fg-subtle">{(fabricSetup.textureIntensity * 100).toFixed(0)}%</span>
-                  </div>
-                  <Input
-                    variant="slider"
-                    min={0} max={1} step={0.01}
-                    value={fabricSetup.textureIntensity}
-                    onChange={(e) => setFabricSetup({ textureIntensity: parseFloat(e.target.value) })}
-                  />
-                </div>
+                <Slider
+                  label="Texture Intensity"
+                  min={0}
+                  max={1}
+                  step={0.01}
+                  value={localFabricSetup.textureIntensity}
+                  onChange={(v) => updateLocalFabricSetup({ textureIntensity: v })}
+                  onChangeCommit={(v) => commitFabricSetup({ textureIntensity: v })}
+                  formatValue={(v) => `${(v * 100).toFixed(0)}%`}
+                />
 
-                <div className="space-y-2.5">
-                  <div className="flex justify-between">
-                    <span className="text-xs font-medium text-fg-muted">Fabric Count (TPI)</span>
-                    <span className="text-[10px] font-mono text-fg-subtle">{fabricSetup.count} ct</span>
-                  </div>
-                  <Input
-                    variant="slider"
-                    min={10} max={40} step={1}
-                    value={fabricSetup.count}
-                    onChange={(e) => setFabricSetup({ count: parseInt(e.target.value) })}
-                  />
-                </div>
+                <Slider
+                  label="Fabric Count (TPI)"
+                  min={10}
+                  max={40}
+                  step={1}
+                  value={localFabricSetup.count}
+                  onChange={(v) => updateLocalFabricSetup({ count: v })}
+                  onChangeCommit={(v) => commitFabricSetup({ count: v })}
+                  formatValue={(v) => `${v} ct`}
+                />
               </div>
             </div>
           </section>
@@ -159,41 +246,42 @@ export function FabricStage() {
                 />
               </div>
 
-              <div className="space-y-2.5">
-                <div className="flex justify-between">
-                  <span className="text-xs font-medium text-fg-muted">Diameter / Width (mm)</span>
-                  <span className="text-[10px] font-mono text-fg-subtle">{fabricSetup.hoop.widthMm}mm</span>
-                </div>
-                <Input
-                  variant="slider"
-                  min={100} max={400} step={1}
-                  value={fabricSetup.hoop.widthMm}
-                  onChange={(e) => {
-                    const val = parseInt(e.target.value)
-                    setFabricSetup({ hoop: { ...fabricSetup.hoop, widthMm: val, heightMm: val } })
-                  }}
-                />
-              </div>
+              <Slider
+                label="Diameter / Width (mm)"
+                min={100}
+                max={400}
+                step={1}
+                value={localFabricSetup.hoop.widthMm}
+                onChange={(v) => updateLocalFabricSetup({ 
+                  hoop: { ...localFabricSetup.hoop, widthMm: v, heightMm: v } 
+                })}
+                onChangeCommit={(v) => commitFabricSetup({ 
+                  hoop: { ...localFabricSetup.hoop, widthMm: v, heightMm: v } 
+                })}
+                formatValue={(v) => `${v}mm`}
+              />
 
-              <div className="space-y-2.5">
-                <div className="flex justify-between">
-                  <span className="text-xs font-medium text-fg-muted">Safety Margin (mm)</span>
-                  <span className="text-[10px] font-mono text-fg-subtle">{fabricSetup.hoop.marginMm}mm</span>
-                </div>
-                <Input
-                  variant="slider"
-                  min={5} max={40} step={1}
-                  value={fabricSetup.hoop.marginMm}
-                  onChange={(e) => setFabricSetup({ hoop: { ...fabricSetup.hoop, marginMm: parseInt(e.target.value) } })}
-                />
-              </div>
+              <Slider
+                label="Safety Margin (mm)"
+                min={5}
+                max={40}
+                step={1}
+                value={localFabricSetup.hoop.marginMm}
+                onChange={(v) => updateLocalFabricSetup({ 
+                  hoop: { ...localFabricSetup.hoop, marginMm: v } 
+                })}
+                onChangeCommit={(v) => commitFabricSetup({ 
+                  hoop: { ...localFabricSetup.hoop, marginMm: v } 
+                })}
+                formatValue={(v) => `${v}mm`}
+              />
             </div>
           </section>
 
           <Button
             className="w-full h-12 text-base font-bold tracking-tight shadow-lg"
             variant="primary"
-            onClick={() => setWorkflowStage('Reference')}
+            onClick={handleConfirmCanvas}
           >
             Confirm Canvas
           </Button>
@@ -221,21 +309,38 @@ export function FabricStage() {
 
       {/* Main View: Visual Preview */}
       <div className="flex-1 bg-surface-2 relative flex items-center justify-center p-12 overflow-hidden shadow-inner">
-        <StudioPreview fabricSetup={fabricSetup} />
+        <StudioPreview fabricSetup={localFabricSetup} />
       </div>
     </div>
   )
 }
 
-function HSLSlider({ label, min, max, value, onChange }: { label: string, min: number, max: number, value: number, onChange: (v: number) => void }) {
+function HSLSlider({ 
+  label, 
+  min, 
+  max, 
+  value, 
+  onChange, 
+  onChangeCommit 
+}: { 
+  label: string
+  min: number
+  max: number
+  value: number
+  onChange: (v: number) => void
+  onChangeCommit?: (v: number) => void
+}) {
   return (
-    <div className="space-y-1.5">
-      <div className="flex justify-between text-[10px] font-bold text-fg-subtle uppercase tracking-wider">
-        <span>{label}</span>
-        <span className="font-mono">{value.toFixed(0)}</span>
-      </div>
-      <Input variant="slider" min={min} max={max} step={label === 'Hue' ? 1 : 0.5} value={value} onChange={(e) => onChange(parseFloat(e.target.value))} />
-    </div>
+    <Slider
+      label={label}
+      min={min}
+      max={max}
+      step={label === 'Hue' ? 1 : 0.5}
+      value={value}
+      onChange={onChange}
+      onChangeCommit={onChangeCommit}
+      formatValue={(v) => v.toFixed(0)}
+    />
   )
 }
 

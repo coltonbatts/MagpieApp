@@ -1,11 +1,11 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
 import { SelectionArtifactModel } from '@/model/SelectionArtifact'
 import { StudioPreview } from './StudioPreview'
 import { MaskLayer } from './MaskLayer'
-import { Button, Input } from '@/components/ui'
+import { Button, Slider } from '@/components/ui'
 
 export function SelectStage() {
     const {
@@ -107,12 +107,12 @@ export function SelectStage() {
             <div className="w-[340px] flex-shrink-0 border-r border-border bg-surface flex flex-col overflow-y-auto">
                 <div className="p-6 space-y-8">
                     <header>
-                        <h2 className="text-xl font-bold tracking-tight text-fg">Define Stitch Area</h2>
-                        <p className="text-sm text-fg-muted">Highlight the areas of your design that should be stitched.</p>
+                        <h2 className="text-xl font-bold tracking-tight text-fg">Choose What to Stitch</h2>
+                        <p className="text-sm text-fg-muted">Mark areas to keep. Everything else will remain as fabric.</p>
                     </header>
 
                     <section className="space-y-6">
-                        <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-fg-subtle">Selection Tool</h3>
+                        <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-fg-subtle">Tools</h3>
                         <div className="grid grid-cols-2 gap-3">
                             <Button
                                 variant={tool === 'brush' ? 'primary' : 'secondary'}
@@ -120,7 +120,7 @@ export function SelectStage() {
                                 onClick={() => setTool('brush')}
                             >
                                 <span className="text-2xl">🖌️</span>
-                                <span className="text-[10px] font-bold uppercase tracking-widest">Brush</span>
+                                <span className="text-[10px] font-bold uppercase tracking-widest">Keep</span>
                             </Button>
                             <Button
                                 variant={tool === 'eraser' ? 'primary' : 'secondary'}
@@ -128,7 +128,7 @@ export function SelectStage() {
                                 onClick={() => setTool('eraser')}
                             >
                                 <span className="text-2xl">🧽</span>
-                                <span className="text-[10px] font-bold uppercase tracking-widest">Eraser</span>
+                                <span className="text-[10px] font-bold uppercase tracking-widest">Remove</span>
                             </Button>
                         </div>
 
@@ -138,7 +138,7 @@ export function SelectStage() {
                             onClick={() => setTool('magic')}
                         >
                             <span className="text-xl">✨</span>
-                            <span className="text-[10px] font-bold uppercase tracking-widest">Auto Select (Magic Wand)</span>
+                            <span className="text-[10px] font-bold uppercase tracking-widest">Auto Keep</span>
                         </Button>
 
                         {tool === 'magic' && (
@@ -156,32 +156,28 @@ export function SelectStage() {
                                         </Button>
                                     ))}
                                 </div>
-                                <div className="space-y-3">
-                                    <div className="flex justify-between">
-                                        <span className="text-xs font-medium text-fg-muted">Stickiness</span>
-                                        <span className="text-[10px] font-mono text-fg-subtle">{magicWandConfig.tolerance}</span>
-                                    </div>
-                                    <Input
-                                        variant="slider"
-                                        min={1} max={100} step={1}
-                                        value={magicWandConfig.tolerance}
-                                        onChange={(e) => setMagicWandConfig({
-                                            tolerance: parseInt(e.target.value),
-                                            edgeStop: Math.max(10, parseInt(e.target.value) * 2)
-                                        })}
-                                    />
-                                </div>
+                                <Slider
+                                    label="Color Tolerance"
+                                    min={1}
+                                    max={100}
+                                    step={1}
+                                    value={magicWandConfig.tolerance}
+                                    onChange={(v) => setMagicWandConfig({
+                                        tolerance: v,
+                                        edgeStop: Math.max(10, v * 2)
+                                    })}
+                                    formatValue={(v) => v.toString()}
+                                />
 
                                 <div className="pt-4 border-t border-gray-100 flex flex-col gap-3">
-                                    <div className="flex justify-between">
-                                        <span className="text-[10px] font-bold uppercase tracking-wider text-fg-subtle">Selection Refinement</span>
-                                        <span className="text-[10px] font-mono text-fg-subtle">{refinementConfig.strength}%</span>
-                                    </div>
-                                    <Input
-                                        variant="slider"
-                                        min={0} max={100} step={1}
+                                    <Slider
+                                        label="Selection Refinement"
+                                        min={0}
+                                        max={100}
+                                        step={1}
                                         value={refinementConfig.strength}
-                                        onChange={(e) => setRefinementConfig({ strength: parseInt(e.target.value) })}
+                                        onChange={(v) => setRefinementConfig({ strength: v })}
+                                        formatValue={(v) => `${v}%`}
                                     />
                                     <Button
                                         variant="secondary"
@@ -214,41 +210,58 @@ export function SelectStage() {
                             </div>
                         )}
 
-                        <div className="space-y-6 pt-4">
-                            <div className="space-y-3">
-                                <div className="flex justify-between">
-                                    <span className="text-xs font-medium text-fg-muted">Brush Diameter</span>
-                                    <span className="text-[10px] font-mono text-fg-subtle">{maskConfig.brushSize}px</span>
-                                </div>
-                                <Input
-                                    variant="slider"
-                                    min={5} max={150} step={1}
-                                    value={maskConfig.brushSize}
-                                    onChange={(e) => setMaskConfig({ brushSize: parseInt(e.target.value) })}
-                                />
-                            </div>
-                            <div className="space-y-3">
-                                <div className="flex justify-between">
-                                    <span className="text-xs font-medium text-fg-muted">Overlay Tint</span>
-                                    <span className="text-[10px] font-mono text-fg-subtle">{Math.round(maskConfig.opacity * 100)}%</span>
-                                </div>
-                                <Input
-                                    variant="slider"
-                                    min={0.1} max={1} step={0.01}
-                                    value={maskConfig.opacity}
-                                    onChange={(e) => setMaskConfig({ opacity: parseFloat(e.target.value) })}
-                                />
-                            </div>
+                        <div className="space-y-5 pt-4">
+                            <Slider
+                                label="Brush Size"
+                                min={5}
+                                max={150}
+                                step={1}
+                                value={maskConfig.brushSize}
+                                onChange={(v) => setMaskConfig({ brushSize: v })}
+                                formatValue={(v) => `${v}px`}
+                            />
+                            <Slider
+                                label="Removal Indicator"
+                                min={0.1}
+                                max={1}
+                                step={0.01}
+                                value={maskConfig.opacity}
+                                onChange={(v) => setMaskConfig({ opacity: v })}
+                                formatValue={(v) => `${Math.round(v * 100)}%`}
+                            />
                         </div>
                     </section>
 
-                    <section className="space-y-2.5 pt-6 border-t border-border/50">
-                        <div className="grid grid-cols-2 gap-2.5">
-                            <Button variant="secondary" size="sm" onClick={handleSelectAll} className="h-9 text-[9px] uppercase font-bold tracking-widest">Select All</Button>
-                            <Button variant="secondary" size="sm" onClick={handleClearAll} className="h-9 text-[9px] uppercase font-bold tracking-widest">Clear All</Button>
-                        </div>
-                        <Button variant="secondary" size="sm" onClick={handleInvert} className="w-full h-9 text-[9px] uppercase font-bold tracking-widest">Invert Selection</Button>
-                    </section>
+                    {selection && (
+                        <section className="space-y-4 pt-6 border-t border-border/50">
+                            <div className="rounded-lg bg-surface-2 p-3 border border-border/50">
+                                <div className="text-[10px] font-bold uppercase tracking-wider text-fg-subtle mb-2">Selection Stats</div>
+                                {(() => {
+                                    const selected = selection.mask.reduce((acc, val) => acc + val, 0)
+                                    const total = selection.mask.length
+                                    const percentage = total > 0 ? (selected / total * 100).toFixed(1) : '0'
+                                    return (
+                                        <div className="space-y-1">
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-xs text-fg-muted">Will be stitched</span>
+                                                <span className="text-sm font-bold text-fg">{percentage}%</span>
+                                            </div>
+                                            <div className="flex justify-between items-center">
+                                                <span className="text-xs text-fg-muted">Pixels</span>
+                                                <span className="text-xs font-mono text-fg-subtle">{selected.toLocaleString()} / {total.toLocaleString()}</span>
+                                            </div>
+                                        </div>
+                                    )
+                                })()}
+                            </div>
+                            
+                            <div className="grid grid-cols-2 gap-2.5">
+                                <Button variant="secondary" size="sm" onClick={handleSelectAll} className="h-9 text-[9px] uppercase font-bold tracking-widest">Keep All</Button>
+                                <Button variant="secondary" size="sm" onClick={handleClearAll} className="h-9 text-[9px] uppercase font-bold tracking-widest">Remove All</Button>
+                            </div>
+                            <Button variant="secondary" size="sm" onClick={handleInvert} className="w-full h-9 text-[9px] uppercase font-bold tracking-widest">Swap Keep/Remove</Button>
+                        </section>
+                    )}
 
                     <div className="flex-1 flex flex-col justify-end gap-3 pb-4">
                         <div className="flex gap-3">
@@ -273,7 +286,7 @@ export function SelectStage() {
 
             {/* Main View: Studio Preview with Alignment Persistence */}
             <div className="flex-1 bg-surface-2 relative flex items-center justify-center p-12 overflow-hidden shadow-inner">
-                <StudioPreview fabricSetup={fabricSetup}>
+                    <StudioPreview fabricSetup={fabricSetup}>
                     <MaskLayer
                         image={selectionWorkingImage}
                         mask={selection.mask}
@@ -283,6 +296,7 @@ export function SelectStage() {
                         magicWandConfig={magicWandConfig}
                         selectionWorkspaceId={selectionWorkspaceId}
                         selectionMode={selectionMode}
+                        fabricColor={fabricSetup.color}
                         onMaskChange={() => { }} // Store update deferred to commit for performance
                         onCommit={(finalMask) => handleCommit(finalMask)}
                     />

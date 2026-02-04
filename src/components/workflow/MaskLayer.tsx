@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useCallback } from 'react'
-import type { ReferencePlacement, MaskConfig, MagicWandConfig } from '@/types'
+import type { ReferencePlacement, MaskConfig, MagicWandConfig, RGBColor } from '@/types'
 import { invoke } from '@tauri-apps/api/core'
 
 interface MaskLayerProps {
@@ -11,14 +11,16 @@ interface MaskLayerProps {
     magicWandConfig?: MagicWandConfig
     selectionWorkspaceId?: string | null
     selectionMode?: 'replace' | 'add' | 'subtract'
+    fabricColor?: RGBColor
     onMaskChange: (newMask: Uint8Array) => void
     onCommit: (newMask: Uint8Array) => void
 }
 
 /**
  * High-performance Masking Layer.
- * Renders the reference image with a Rubylith (red tint) overlay on unselected areas.
- * Handles mouse/touch painting logic.
+ * Renders the reference image with fabric color showing through unselected areas.
+ * This gives a true preview: selected areas show the reference (what will be stitched),
+ * unselected areas show fabric (what will remain as fabric).
  */
 export function MaskLayer({
     image,
@@ -29,6 +31,7 @@ export function MaskLayer({
     magicWandConfig,
     selectionWorkspaceId,
     selectionMode = 'replace',
+    fabricColor = { r: 245, g: 245, b: 220 }, // Default light linen
     onMaskChange,
     onCommit
 }: MaskLayerProps) {
@@ -57,42 +60,67 @@ export function MaskLayer({
             canvas.height = height
         }
 
-        // 1. Draw original working image
         ctx.clearRect(0, 0, width, height)
-        ctx.putImageData(image, 0, 0)
-
-        // 2. Create Rubylith (red tint) overlay for unselected (mask[i] === 0) areas
-        const maskData = ctx.createImageData(width, height)
         const currentMask = maskCopyRef.current
+        const imageData = ctx.createImageData(width, height)
+        const imagePixels = image.data
 
+        // Render pixel by pixel:
+        // - Selected areas (mask[i] === 1): Show reference image (what will be stitched)
+        // - Unselected areas (mask[i] === 0): Show fabric color (what will remain)
         for (let i = 0; i < currentMask.length; i++) {
             const idx = i * 4
-            // If mask is 0, it's NOT selected (fabric area). Tint it red.
-            if (currentMask[i] === 0) {
-                maskData.data[idx] = 220
-                maskData.data[idx + 1] = 38
-                maskData.data[idx + 2] = 38
-                maskData.data[idx + 3] = 200 // Semi-opaque red
+            
+            if (currentMask[i] === 1) {
+                // Selected: Show reference image (what you're keeping/stitching)
+                imageData.data[idx] = imagePixels[idx]
+                imageData.data[idx + 1] = imagePixels[idx + 1]
+                imageData.data[idx + 2] = imagePixels[idx + 2]
+                imageData.data[idx + 3] = imagePixels[idx + 3]
             } else {
-                // Selected (stitch area). Keep it clear.
-                maskData.data[idx + 3] = 0
+                // Unselected: Show fabric color (what will remain as fabric)
+                // Blend fabric with a subtle red tint to indicate "removal"
+                const removalTint = 0.15 // How much red tint to add
+                const fabricBlend = 1 - removalTint
+                
+                imageData.data[idx] = Math.min(255, fabricColor.r * fabricBlend + 220 * removalTint)
+                imageData.data[idx + 1] = Math.min(255, fabricColor.g * fabricBlend + 38 * removalTint)
+                imageData.data[idx + 2] = Math.min(255, fabricColor.b * fabricBlend + 38 * removalTint)
+                imageData.data[idx + 3] = 255
             }
         }
 
-        // 3. Composite the overlay with the user-defined opacity
-        const overlayCanvas = document.createElement('canvas')
-        overlayCanvas.width = width
-        overlayCanvas.height = height
-        overlayCanvas.getContext('2d')?.putImageData(maskData, 0, 0)
+        ctx.putImageData(imageData, 0, 0)
 
-        ctx.save()
-        ctx.globalAlpha = config.opacity
-        ctx.drawImage(overlayCanvas, 0, 0)
-        ctx.restore()
+        // Add subtle red border on edges between selected/unselected areas
+        // This helps distinguish "removed" areas while still showing fabric color
+        if (config.opacity > 0.1) {
+            ctx.save()
+            ctx.globalAlpha = config.opacity * 0.4
+            ctx.fillStyle = 'rgba(220, 38, 38, 0.3)'
+            
+            // Only draw borders at edges (more efficient than checking every pixel)
+            for (let y = 0; y < height; y++) {
+                for (let x = 0; x < width; x++) {
+                    const idx = y * width + x
+                    if (currentMask[idx] === 0) {
+                        // Check if this unselected pixel borders a selected pixel
+                        const hasSelectedNeighbor = 
+                            (x > 0 && currentMask[(y * width + (x - 1))] === 1) ||
+                            (x < width - 1 && currentMask[(y * width + (x + 1))] === 1) ||
+                            (y > 0 && currentMask[((y - 1) * width + x)] === 1) ||
+                            (y < height - 1 && currentMask[((y + 1) * width + x)] === 1)
+                        
+                        if (hasSelectedNeighbor) {
+                            ctx.fillRect(x, y, 1, 1)
+                        }
+                    }
+                }
+            }
+            ctx.restore()
+        }
 
-        // 4. Subtle brush preview (not implemented here for simplicity, but could be added)
-
-    }, [image, config.opacity])
+    }, [image, config.opacity, fabricColor])
 
     useEffect(() => {
         render()

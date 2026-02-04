@@ -1,4 +1,4 @@
-import { ReactNode } from 'react'
+import { ReactNode, memo } from 'react'
 import type { FabricSetup } from '@/types'
 
 interface StudioPreviewProps {
@@ -6,22 +6,34 @@ interface StudioPreviewProps {
     children?: ReactNode
 }
 
-export function StudioPreview({ fabricSetup, children }: StudioPreviewProps) {
+export const StudioPreview = memo(function StudioPreview({ fabricSetup, children }: StudioPreviewProps) {
+    // Safety checks
+    if (!fabricSetup || !fabricSetup.color || !fabricSetup.hoop) {
+        return null
+    }
+
     const { r, g, b } = fabricSetup.color
     const { shape, widthMm, heightMm, marginMm } = fabricSetup.hoop
+
+    // Validate numeric values
+    if (typeof widthMm !== 'number' || typeof heightMm !== 'number' || typeof marginMm !== 'number' ||
+        isNaN(widthMm) || isNaN(heightMm) || isNaN(marginMm) ||
+        widthMm <= 0 || heightMm <= 0 || marginMm < 0) {
+        return null
+    }
 
     // Viewport mapping: 1mm = 2.5px for a nice zoom
     const scale = 2.5
     const hoopW = widthMm * scale
     const hoopH = heightMm * scale
-    const marginW = (widthMm - marginMm * 2) * scale
-    const marginH = (heightMm - marginMm * 2) * scale
+    const marginW = Math.max(0, (widthMm - marginMm * 2) * scale)
+    const marginH = Math.max(0, (heightMm - marginMm * 2) * scale)
 
     return (
         <div className="relative w-full h-full flex items-center justify-center">
             {/* The Fabric Surface */}
             <div
-                className="absolute inset-0 transition-colors duration-500 ease-in-out"
+                className="absolute inset-0 transition-colors duration-50 ease-out"
                 style={{ backgroundColor: `rgb(${r}, ${g}, ${b})` }}
             >
                 {/* Fabric Texture Overlay (Noise/Grain) */}
@@ -41,11 +53,15 @@ export function StudioPreview({ fabricSetup, children }: StudioPreviewProps) {
                         filter: `blur(0.5px)`
                     }}
                 />
+
+                {/* Global Lighting Shadow (Vignette) */}
+                <div className="absolute inset-0 pointer-events-none shadow-[inset_0_0_150px_rgba(0,0,0,0.15)] mix-blend-multiply" />
+                <div className="absolute inset-0 pointer-events-none bg-gradient-to-tr from-black/10 via-transparent to-white/5 mix-blend-overlay" />
             </div>
 
             {/* The Hoop Representation */}
             <div
-                className="relative transition-all duration-500 ease-in-out"
+                className="relative transition-all duration-75 ease-out"
                 style={{
                     width: hoopW,
                     height: hoopH,
@@ -60,7 +76,7 @@ export function StudioPreview({ fabricSetup, children }: StudioPreviewProps) {
 
                 {/* Hoop Frame (Physical Look - Wooden/Matte effect) */}
                 <div
-                    className="absolute inset-[-14px] border-[14px] border-[#e2e8f0] shadow-2xl transition-all duration-500 pointer-events-none"
+                    className="absolute inset-[-14px] border-[14px] border-[#e2e8f0] shadow-2xl transition-all duration-75 pointer-events-none"
                     style={{
                         borderRadius: shape === 'round' ? '50%' : '24px',
                         boxShadow: 'inset 0 0 10px rgba(0,0,0,0.05), 0 10px 30px rgba(0,0,0,0.1)',
@@ -72,7 +88,7 @@ export function StudioPreview({ fabricSetup, children }: StudioPreviewProps) {
                     className="absolute inset-0 flex items-center justify-center pointer-events-none"
                 >
                     <div
-                        className="border-2 border-dashed border-black/10 transition-all duration-500 ease-in-out flex items-center justify-center"
+                        className="border-2 border-dashed border-black/10 transition-all duration-75 ease-out flex items-center justify-center"
                         style={{
                             width: marginW,
                             height: marginH,
@@ -101,4 +117,4 @@ export function StudioPreview({ fabricSetup, children }: StudioPreviewProps) {
             </div>
         </div>
     )
-}
+})

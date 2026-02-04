@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
 import { UploadZone } from '@/components/UploadZone'
-import { Button, Input } from '@/components/ui'
+import { Button, Slider } from '@/components/ui'
 import { StudioPreview } from './StudioPreview'
 import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
 import { fitImageInHoop } from '@/lib/hoop-layout'
+import type { ReferencePlacement } from '@/types'
 
 export function ReferenceStage() {
   const { originalImage, fabricSetup, referencePlacement, setReferencePlacement } = usePatternStore()
@@ -13,32 +14,46 @@ export function ReferenceStage() {
   // Track if we've auto-fitted since the image changed
   const [lastImageRef, setLastImageRef] = useState<ImageBitmap | null>(null)
 
-  // Drag state
+  // Local state for instant preview updates during slider drag
+  const [localPlacement, setLocalPlacement] = useState<ReferencePlacement | null>(referencePlacement)
+  const isDraggingSliderRef = useRef(false)
+  const isDraggingImageRef = useRef(false)
+
+  // Sync local placement when store updates (but not during drag)
+  useEffect(() => {
+    if (!isDraggingSliderRef.current && !isDraggingImageRef.current) {
+      setLocalPlacement(referencePlacement)
+    }
+  }, [referencePlacement])
+
+  // Drag state for image positioning
   const [isDragging, setIsDragging] = useState(false)
-  const [dragStart, setDragStart] = useState<{ x: number, y: number, placement: any } | null>(null)
+  const [dragStart, setDragStart] = useState<{ x: number, y: number, placement: ReferencePlacement } | null>(null)
 
   useEffect(() => {
     if (originalImage && originalImage !== lastImageRef) {
       const nextPlacement = fitImageInHoop(originalImage.width, originalImage.height)
       setReferencePlacement(nextPlacement)
+      setLocalPlacement(nextPlacement)
       setLastImageRef(originalImage)
     }
   }, [originalImage, lastImageRef, setReferencePlacement])
 
-  const handlePointerDown = (e: React.PointerEvent) => {
-    if (!referencePlacement) return
+  const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    if (!localPlacement) return
     const container = e.currentTarget
     setIsDragging(true)
+    isDraggingImageRef.current = true
     container.setPointerCapture(e.pointerId)
     setDragStart({
       x: e.clientX,
       y: e.clientY,
-      placement: { ...referencePlacement }
+      placement: { ...localPlacement }
     })
-  }
+  }, [localPlacement])
 
-  const handlePointerMove = (e: React.PointerEvent) => {
-    if (!isDragging || !dragStart || !referencePlacement) return
+  const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!isDragging || !dragStart || !localPlacement) return
 
     const container = e.currentTarget
     const rect = container.getBoundingClientRect()
@@ -46,43 +61,93 @@ export function ReferenceStage() {
     const dx = (e.clientX - dragStart.x) / rect.width
     const dy = (e.clientY - dragStart.y) / rect.height
 
-    setReferencePlacement({
+    const newPlacement: ReferencePlacement = {
       ...dragStart.placement,
       x: dragStart.placement.x + dx,
       y: dragStart.placement.y + dy
-    })
-  }
+    }
+    
+    // Instant local update
+    setLocalPlacement(newPlacement)
+    // Also update store for persistence
+    setReferencePlacement(newPlacement)
+  }, [isDragging, dragStart, localPlacement, setReferencePlacement])
 
-  const handlePointerUp = (e: React.PointerEvent) => {
+  const handlePointerUp = useCallback((e: React.PointerEvent) => {
     setIsDragging(false)
+    isDraggingImageRef.current = false
     setDragStart(null)
     e.currentTarget.releasePointerCapture(e.pointerId)
-  }
+  }, [])
 
-  const handleScaleChange = (scaleMultiplier: number) => {
-    if (!referencePlacement || !originalImage) return
+  // Instant preview update (local state only)
+  const updateLocalPlacement = useCallback((updates: Partial<ReferencePlacement>) => {
+    if (!localPlacement) return
+    isDraggingSliderRef.current = true
+    setLocalPlacement({
+      ...localPlacement,
+      ...updates
+    })
+  }, [localPlacement])
+
+  // Commit to store (called on mouse up)
+  const commitPlacement = useCallback((placement: ReferencePlacement) => {
+    isDraggingSliderRef.current = false
+    setReferencePlacement(placement)
+  }, [setReferencePlacement])
+
+  const handleScaleChange = useCallback((newWidth: number) => {
+    if (!localPlacement || !originalImage) return
 
     // Scale from the center
-    const centerX = referencePlacement.x + referencePlacement.width / 2
-    const centerY = referencePlacement.y + referencePlacement.height / 2
+    const centerX = localPlacement.x + localPlacement.width / 2
+    const centerY = localPlacement.y + localPlacement.height / 2
+    const aspectRatio = localPlacement.height / localPlacement.width
+    const newHeight = newWidth * aspectRatio
 
-    const nextWidth = referencePlacement.width * scaleMultiplier
-    const nextHeight = referencePlacement.height * scaleMultiplier
-
-    setReferencePlacement({
-      x: centerX - nextWidth / 2,
-      y: centerY - nextHeight / 2,
-      width: nextWidth,
-      height: nextHeight
-    })
-  }
-
-
-  const handleReset = () => {
-    if (originalImage) {
-      setReferencePlacement(fitImageInHoop(originalImage.width, originalImage.height))
+    const newPlacement: ReferencePlacement = {
+      x: centerX - newWidth / 2,
+      y: centerY - newHeight / 2,
+      width: newWidth,
+      height: newHeight
     }
-  }
+
+    // Instant local update
+    updateLocalPlacement(newPlacement)
+  }, [localPlacement, originalImage, updateLocalPlacement])
+
+  const handleScaleCommit = useCallback((newWidth: number) => {
+    if (!localPlacement || !originalImage) return
+
+    const centerX = localPlacement.x + localPlacement.width / 2
+    const centerY = localPlacement.y + localPlacement.height / 2
+    const aspectRatio = localPlacement.height / localPlacement.width
+    const newHeight = newWidth * aspectRatio
+
+    const newPlacement: ReferencePlacement = {
+      x: centerX - newWidth / 2,
+      y: centerY - newHeight / 2,
+      width: newWidth,
+      height: newHeight
+    }
+
+    commitPlacement(newPlacement)
+  }, [localPlacement, originalImage, commitPlacement])
+
+  const handleReset = useCallback(() => {
+    if (originalImage) {
+      const resetPlacement = fitImageInHoop(originalImage.width, originalImage.height)
+      setLocalPlacement(resetPlacement)
+      setReferencePlacement(resetPlacement)
+    }
+  }, [originalImage, setReferencePlacement])
+  
+  // Calculate scale percentage for display
+  const scalePercentage = useMemo(() => {
+    if (!localPlacement) return 0
+    // Calculate percentage based on initial fit (width = 1.0 = 100%)
+    return Math.round(localPlacement.width * 100)
+  }, [localPlacement])
 
   return (
     <div className="flex h-full w-full overflow-hidden bg-bg">
@@ -99,31 +164,21 @@ export function ReferenceStage() {
             <UploadZone />
           </section>
 
-          {originalImage && referencePlacement && (
+          {originalImage && localPlacement && (
             <section className="space-y-6 animate-in fade-in slide-in-from-left-4 duration-500">
               <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-fg-subtle">Placement Adjustments</h3>
 
               <div className="space-y-6">
-                <div className="space-y-2.5">
-                  <div className="flex justify-between">
-                    <span className="text-xs font-medium text-fg-muted">Scale</span>
-                    <span className="text-[10px] font-mono text-fg-subtle">{(referencePlacement.width * 100).toFixed(0)}%</span>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <Button size="sm" variant="secondary" onClick={() => handleScaleChange(0.95)} className="px-2 h-7">-</Button>
-                    <Input
-                      variant="slider"
-                      min={0.1} max={3} step={0.01}
-                      value={referencePlacement.width}
-                      onChange={(e) => {
-                        const newW = parseFloat(e.target.value)
-                        const ratio = newW / referencePlacement.width
-                        handleScaleChange(ratio)
-                      }}
-                    />
-                    <Button size="sm" variant="secondary" onClick={() => handleScaleChange(1.05)} className="px-2 h-7">+</Button>
-                  </div>
-                </div>
+                <Slider
+                  label="Scale"
+                  min={0.1}
+                  max={3}
+                  step={0.01}
+                  value={localPlacement.width}
+                  onChange={handleScaleChange}
+                  onChangeCommit={handleScaleCommit}
+                  formatValue={(v) => `${Math.round(v * 100)}%`}
+                />
 
                 <div className="space-y-4 pt-4 border-t border-border/50">
                   <div className="flex justify-between items-center">
@@ -159,10 +214,10 @@ export function ReferenceStage() {
         onPointerUp={handlePointerUp}
       >
         <StudioPreview fabricSetup={fabricSetup}>
-          {originalImage && referencePlacement && (
+          {originalImage && localPlacement && (
             <ImageLayer
               image={originalImage}
-              placement={referencePlacement}
+              placement={localPlacement}
             />
           )}
         </StudioPreview>
@@ -171,17 +226,25 @@ export function ReferenceStage() {
   )
 }
 
-function ImageLayer({ image, placement }: { image: ImageBitmap, placement: any }) {
-  const canvasRef = (canvas: HTMLCanvasElement | null) => {
+function ImageLayer({ image, placement }: { image: ImageBitmap, placement: ReferencePlacement }) {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null)
+  const rafRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    const canvas = canvasRef.current
     if (!canvas) return
-    const dpr = window.devicePixelRatio || 1
-    const rect = canvas.getBoundingClientRect()
 
-    canvas.width = Math.floor(rect.width * dpr)
-    canvas.height = Math.floor(rect.height * dpr)
+    const draw = () => {
+      if (!canvas) return
+      const dpr = window.devicePixelRatio || 1
+      const rect = canvas.getBoundingClientRect()
 
-    const ctx = canvas.getContext('2d')
-    if (ctx) {
+      canvas.width = Math.floor(rect.width * dpr)
+      canvas.height = Math.floor(rect.height * dpr)
+
+      const ctx = canvas.getContext('2d')
+      if (!ctx) return
+
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
       ctx.clearRect(0, 0, rect.width, rect.height)
       ctx.imageSmoothingEnabled = true
@@ -198,7 +261,57 @@ function ImageLayer({ image, placement }: { image: ImageBitmap, placement: any }
       ctx.fillStyle = 'rgba(255, 255, 255, 0.03)'
       ctx.fillRect(x, y, w, h)
     }
-  }
+
+    // Use requestAnimationFrame for smooth updates
+    if (rafRef.current) {
+      cancelAnimationFrame(rafRef.current)
+    }
+    rafRef.current = requestAnimationFrame(draw)
+
+    return () => {
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current)
+      }
+    }
+  }, [image, placement])
+
+  // Also handle resize
+  useEffect(() => {
+    const handleResize = () => {
+      const canvas = canvasRef.current
+      if (!canvas) return
+      
+      if (rafRef.current) {
+        cancelAnimationFrame(rafRef.current)
+      }
+      rafRef.current = requestAnimationFrame(() => {
+        const dpr = window.devicePixelRatio || 1
+        const rect = canvas.getBoundingClientRect()
+        canvas.width = Math.floor(rect.width * dpr)
+        canvas.height = Math.floor(rect.height * dpr)
+        
+        const ctx = canvas.getContext('2d')
+        if (!ctx) return
+        
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+        ctx.clearRect(0, 0, rect.width, rect.height)
+        ctx.imageSmoothingEnabled = true
+        ctx.imageSmoothingQuality = 'high'
+        
+        const w = placement.width * rect.width
+        const h = placement.height * rect.height
+        const x = placement.x * rect.width
+        const y = placement.y * rect.height
+        
+        ctx.drawImage(image, x, y, w, h)
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.03)'
+        ctx.fillRect(x, y, w, h)
+      })
+    }
+
+    window.addEventListener('resize', handleResize)
+    return () => window.removeEventListener('resize', handleResize)
+  }, [image, placement])
 
   return <canvas ref={canvasRef} className="absolute inset-0 w-full h-full pointer-events-none" />
 }

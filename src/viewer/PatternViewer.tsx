@@ -117,28 +117,95 @@ function usePatternRegions(pattern: Pattern | null) {
   return { regions, isComputing }
 }
 
-interface PatternViewerProps {
+export interface PatternViewerProps {
   pattern: Pattern | null
+  activeTab?: 'finished' | 'pattern'
+  onActiveTabChange?: (tab: 'finished' | 'pattern') => void
+  showStitchedOnly?: boolean
+  onShowStitchedOnlyChange?: (show: boolean) => void
+  showGrid?: boolean
+  onShowGridChange?: (show: boolean) => void
+  showLabels?: boolean
+  onShowLabelsChange?: (show: boolean) => void
+  showOutlines?: boolean
+  onShowOutlinesChange?: (show: boolean) => void
+  editModeEnabled?: boolean
+  onEditModeEnabledChange?: (enabled: boolean) => void
+  editTool?: 'paint' | 'fabric'
+  onEditToolChange?: (tool: 'paint' | 'fabric') => void
+  selectedPaintValue?: string
+  onSelectedPaintValueChange?: (value: string) => void
+  hoveredRegionId?: number | null
+  onHoveredRegionIdChange?: (id: number | null) => void
 }
 
-const VIEWER_TABS: Array<{ value: 'finished' | 'pattern'; label: string }> = [
-  { value: 'finished', label: 'Finished' },
-  { value: 'pattern', label: 'Pattern' },
-]
-
-export function PatternViewer({ pattern }: PatternViewerProps) {
+export function PatternViewer({
+  pattern,
+  activeTab: controlledActiveTab,
+  onActiveTabChange,
+  showStitchedOnly: controlledShowStitchedOnly,
+  onShowStitchedOnlyChange,
+  showGrid: controlledShowGrid,
+  onShowGridChange,
+  showLabels: controlledShowLabels,
+  onShowLabelsChange,
+  showOutlines: controlledShowOutlines,
+  onShowOutlinesChange,
+  editModeEnabled: controlledEditModeEnabled,
+  onEditModeEnabledChange,
+  editTool: controlledEditTool,
+  onEditToolChange,
+  selectedPaintValue: controlledSelectedPaintValue,
+  onSelectedPaintValueChange,
+  hoveredRegionId: controlledHoveredRegionId,
+  onHoveredRegionIdChange,
+}: PatternViewerProps) {
   const { workflowStage } = useUIStore()
-  const [activeTab, setActiveTab] = useState<'finished' | 'pattern'>('finished')
 
-  // Local toggles for Finished Preview
-  const [showStitchedOnly, setShowStitchedOnly] = useState(false)
+  // Local fallbacks if not controlled
+  const [internalActiveTab, setInternalActiveTab] = useState<'finished' | 'pattern'>('finished')
+  const activeTab = controlledActiveTab ?? internalActiveTab
+  const setActiveTab = (tab: 'finished' | 'pattern') => {
+    onActiveTabChange?.(tab)
+    setInternalActiveTab(tab)
+  }
 
-  // Local toggles for Pattern Preview
+  const [internalShowStitchedOnly, setInternalShowStitchedOnly] = useState(false)
+  const showStitchedOnly = controlledShowStitchedOnly ?? internalShowStitchedOnly
+  const setShowStitchedOnly = (show: boolean) => {
+    onShowStitchedOnlyChange?.(show)
+    setInternalShowStitchedOnly(show)
+  }
+
   const { viewMode, setViewMode, highlightColorKey, setHighlightColorKey } = useUIStore()
-  const [showGrid, setShowGrid] = useState(false)
-  const [showLabels, setShowLabels] = useState(true)
-  const [showOutlines, setShowOutlines] = useState(true)
-  const [hoveredRegionId, setHoveredRegionId] = useState<number | null>(null)
+
+  const [internalShowGrid, setInternalShowGrid] = useState(false)
+  const showGrid = controlledShowGrid ?? internalShowGrid
+  const setShowGrid = (show: boolean) => {
+    onShowGridChange?.(show)
+    setInternalShowGrid(show)
+  }
+
+  const [internalShowLabels, setInternalShowLabels] = useState(true)
+  const showLabels = controlledShowLabels ?? internalShowLabels
+  const setShowLabels = (show: boolean) => {
+    onShowLabelsChange?.(show)
+    setInternalShowLabels(show)
+  }
+
+  const [internalShowOutlines, setInternalShowOutlines] = useState(true)
+  const showOutlines = controlledShowOutlines ?? internalShowOutlines
+  const setShowOutlines = (show: boolean) => {
+    onShowOutlinesChange?.(show)
+    setInternalShowOutlines(show)
+  }
+
+  const [internalHoveredRegionId, setInternalHoveredRegionId] = useState<number | null>(null)
+  const hoveredRegionId = controlledHoveredRegionId ?? internalHoveredRegionId
+  const setHoveredRegionId = (id: number | null) => {
+    onHoveredRegionIdChange?.(id)
+    setInternalHoveredRegionId(id)
+  }
 
   // Sync stage to tab
   useEffect(() => {
@@ -168,8 +235,6 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
   const processingConfig = usePatternStore((state) => state.processingConfig)
   const applyManualEdits = usePatternStore((state) => state.applyManualEdits)
   const clearManualEdits = usePatternStore((state) => state.clearManualEdits)
-  const editTool = usePatternStore((state) => state.manualEditTool)
-  const setEditTool = usePatternStore((state) => state.setManualEditTool)
   const worldSizeRef = useRef({ width: 1, height: 1 })
   const hasUserTransformedViewportRef = useRef(false)
   const pendingEditFrameRef = useRef<number | null>(null)
@@ -179,8 +244,28 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
   const [viewerError, setViewerError] = useState<string | null>(null)
   const [isReady, setIsReady] = useState(false)
   const [debugText, setDebugText] = useState('')
-  const [editModeEnabled, setEditModeEnabled] = useState(false)
-  const [selectedPaintValue, setSelectedPaintValue] = useState<string>('')
+
+  const [internalEditModeEnabled, setInternalEditModeEnabled] = useState(false)
+  const editModeEnabled = controlledEditModeEnabled ?? internalEditModeEnabled
+  const setEditModeEnabled = (enabled: boolean) => {
+    onEditModeEnabledChange?.(enabled)
+    setInternalEditModeEnabled(enabled)
+  }
+
+  const [internalEditTool, setInternalEditTool] = useState<'paint' | 'fabric'>('paint')
+  const editTool = controlledEditTool ?? internalEditTool
+  const setEditTool = (tool: 'paint' | 'fabric') => {
+    onEditToolChange?.(tool)
+    setInternalEditTool(tool)
+  }
+
+  const [internalSelectedPaintValue, setInternalSelectedPaintValue] = useState<string>('')
+  const selectedPaintValue = controlledSelectedPaintValue ?? internalSelectedPaintValue
+  const setSelectedPaintValue = (value: string) => {
+    onSelectedPaintValueChange?.(value)
+    setInternalSelectedPaintValue(value)
+  }
+
   const isDev = import.meta.env.DEV
   const fabricIndices = useMemo(
     () => (pattern ? getFabricIndices(pattern, processingConfig) : new Set<number>()),
@@ -557,42 +642,54 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
         className="h-full w-full"
         style={{ touchAction: 'none' }}
       />
-      <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-lg border border-border bg-overlay/95 p-1 shadow-sm backdrop-blur">
-        <SegmentedControl
-          value={activeTab}
-          onValueChange={setActiveTab}
-          options={VIEWER_TABS}
-          ariaLabel="Viewer mode"
-        />
-      </div>
 
-      <div className="absolute left-4 top-4 z-10 flex flex-col gap-2">
-        {activeTab === 'finished' ? (
-          <div className="flex items-center gap-3 rounded-lg border border-border bg-overlay/95 px-3 py-2 shadow-sm backdrop-blur">
-            <span className="select-none text-xs font-medium text-fg-muted">Stitched Only</span>
-            <Toggle checked={showStitchedOnly} onCheckedChange={setShowStitchedOnly} />
-          </div>
-        ) : (
-          <div className="flex flex-col gap-2 rounded-lg border border-border bg-overlay/95 p-2 shadow-sm backdrop-blur">
-            <div className="flex items-center justify-between gap-4 rounded-md px-1 py-0.5">
-              <span className="select-none text-xs font-medium text-fg-muted">Grid</span>
-              <Toggle checked={showGrid} onCheckedChange={setShowGrid} />
+      {/* 
+        The following UI overlays are only rendered if NOT controlled. 
+        If controlled, the parent stage is responsible for rendering its own UI.
+      */}
+      {!controlledActiveTab && (
+        <div className="absolute left-1/2 top-4 z-10 -translate-x-1/2 rounded-lg border border-border bg-overlay/95 p-1 shadow-sm backdrop-blur">
+          <SegmentedControl
+            value={activeTab}
+            onValueChange={setActiveTab}
+            options={[
+              { value: 'finished', label: 'Finished' },
+              { value: 'pattern', label: 'Pattern' },
+            ]}
+            ariaLabel="Viewer mode"
+          />
+        </div>
+      )}
+
+      {!controlledActiveTab && (
+        <div className="absolute left-4 top-4 z-10 flex flex-col gap-2">
+          {activeTab === 'finished' ? (
+            <div className="flex items-center gap-3 rounded-lg border border-border bg-overlay/95 px-3 py-2 shadow-sm backdrop-blur">
+              <span className="select-none text-xs font-medium text-fg-muted">Stitched Only</span>
+              <Toggle checked={showStitchedOnly} onCheckedChange={setShowStitchedOnly} />
             </div>
-            <div className="flex items-center justify-between gap-4 rounded-md px-1 py-0.5">
-              <span className="select-none text-xs font-medium text-fg-muted">Labels</span>
-              <Toggle checked={showLabels} onCheckedChange={setShowLabels} />
+          ) : (
+            <div className="flex flex-col gap-2 rounded-lg border border-border bg-overlay/95 p-2 shadow-sm backdrop-blur">
+              <div className="flex items-center justify-between gap-4 rounded-md px-1 py-0.5">
+                <span className="select-none text-xs font-medium text-fg-muted">Grid</span>
+                <Toggle checked={showGrid} onCheckedChange={setShowGrid} />
+              </div>
+              <div className="flex items-center justify-between gap-4 rounded-md px-1 py-0.5">
+                <span className="select-none text-xs font-medium text-fg-muted">Labels</span>
+                <Toggle checked={showLabels} onCheckedChange={setShowLabels} />
+              </div>
+              <div className="flex items-center justify-between gap-4 rounded-md px-1 py-0.5">
+                <span className="select-none text-xs font-medium text-fg-muted">Outlines</span>
+                <Toggle checked={showOutlines} onCheckedChange={setShowOutlines} />
+              </div>
+              <div className="flex items-center justify-between gap-4 rounded-md px-1 py-0.5">
+                <span className="select-none text-xs font-medium text-fg-muted">Edit Mode</span>
+                <Toggle checked={editModeEnabled} onCheckedChange={setEditModeEnabled} />
+              </div>
             </div>
-            <div className="flex items-center justify-between gap-4 rounded-md px-1 py-0.5">
-              <span className="select-none text-xs font-medium text-fg-muted">Outlines</span>
-              <Toggle checked={showOutlines} onCheckedChange={setShowOutlines} />
-            </div>
-            <div className="flex items-center justify-between gap-4 rounded-md px-1 py-0.5">
-              <span className="select-none text-xs font-medium text-fg-muted">Edit Mode</span>
-              <Toggle checked={editModeEnabled} onCheckedChange={setEditModeEnabled} />
-            </div>
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
       <div className="absolute right-4 top-4 z-10">
         <div className="rounded-lg border border-border bg-overlay/95 p-1 shadow-sm backdrop-blur">
@@ -609,7 +706,7 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
         </div>
       </div>
 
-      {activeTab === 'pattern' && editModeEnabled && (
+      {!controlledActiveTab && activeTab === 'pattern' && editModeEnabled && (
         <div className="absolute bottom-4 left-4 z-20 flex w-80 flex-col gap-2 rounded-lg border border-border bg-overlay/95 p-3 shadow-sm backdrop-blur">
           <div className="grid grid-cols-2 gap-2">
             <Button

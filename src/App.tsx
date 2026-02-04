@@ -1,11 +1,7 @@
 import { useEffect, useState } from 'react'
-import { ControlPanel } from './components/ControlPanel'
-import { Layout } from './components/Layout'
-import { Legend } from './components/Legend'
 import { SelectionArtifactModel } from './model/SelectionArtifact'
 import { usePatternStore } from './store/pattern-store'
 import { useUIStore } from './store/ui-store'
-import { PatternViewer } from './viewer/PatternViewer'
 import { DMCTester } from './components/DMCTester'
 import { logNormalizedImageDebug, logPatternPaletteDebug } from './processing/debug-color'
 import { runPatternColorSanityTest } from './model/pattern-color.sanity'
@@ -14,11 +10,13 @@ import { WorkflowStepper } from './components/workflow/WorkflowStepper'
 import { FabricStage } from './components/workflow/FabricStage'
 import { ReferenceStage } from './components/workflow/ReferenceStage'
 import { SelectStage } from './components/workflow/SelectStage'
+import { BuildStage } from './components/workflow/BuildStage'
+import { ExportStage } from './components/workflow/ExportStage'
 import { processPattern } from './processing/process-pattern'
 import { incrementDevCounter } from './lib/dev-instrumentation'
 
 export default function App() {
-  const { pattern, normalizedImage, referenceId, selection, processingConfig, setPattern } = usePatternStore()
+  const { normalizedImage, referenceId, selection, processingConfig, setPattern } = usePatternStore()
   const { workflowStage } = useUIStore()
   const [showDMCTester, setShowDMCTester] = useState(false)
   const isDev = import.meta.env.DEV
@@ -114,14 +112,9 @@ export default function App() {
       case 'Select':
         return <SelectStage />
       case 'Build':
+        return <BuildStage />
       case 'Export':
-        return (
-          <Layout
-            viewer={<PatternViewer pattern={pattern} />}
-            controls={<ControlPanel />}
-            legend={<Legend />}
-          />
-        )
+        return <ExportStage />
       default:
         return <FabricStage />
     }
