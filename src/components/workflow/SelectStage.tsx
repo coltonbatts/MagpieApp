@@ -1,31 +1,27 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import React, { useState } from 'react'
 import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
 import { SelectionArtifactModel } from '@/model/SelectionArtifact'
+import { StudioPreview } from './StudioPreview'
+import { MaskLayer } from './MaskLayer'
+import { Button, Input } from '@/components/ui'
 
 export function SelectStage() {
-    const { selectionWorkingImage, referenceId, selection, fabricSetup, setSelection, maskConfig, setMaskConfig } = usePatternStore()
+    const {
+        selectionWorkingImage,
+        referenceId,
+        selection,
+        fabricSetup,
+        referencePlacement,
+        setSelection,
+        maskConfig,
+        setMaskConfig
+    } = usePatternStore()
     const { setWorkflowStage } = useUIStore()
-    const canvasRef = useRef<HTMLCanvasElement>(null)
-    const [isDrawing, setIsDrawing] = useState(false)
     const [tool, setTool] = useState<'brush' | 'eraser'>('brush')
 
-    // Performance refs: avoid React state chugging during mouse move
-    const maskRef = useRef<Uint8Array | null>(null)
-    const isDirtyRef = useRef(false)
-    const offscreenOverlayRef = useRef<HTMLCanvasElement | null>(null)
-
-    // Sync store selection to local ref if IDs mismatch (e.g. initial load or undo/redo)
-    useEffect(() => {
-        if (selection && (!maskRef.current || selection.mask !== maskRef.current)) {
-            // Only update from store if it's a "remote" change (not our own draw)
-            maskRef.current = new Uint8Array(selection.mask)
-            isDirtyRef.current = true
-        }
-    }, [selection])
-
     // Initialize selection if it doesn't exist
-    useEffect(() => {
+    React.useEffect(() => {
         if (selectionWorkingImage && referenceId && !selection) {
             setSelection(SelectionArtifactModel.createDefault(
                 selectionWorkingImage.width,
@@ -35,380 +31,171 @@ export function SelectStage() {
         }
     }, [selectionWorkingImage, referenceId, selection, setSelection])
 
-    // Pre-calculate the dimming overlay whenever dimensions or mask opacity change
-    useEffect(() => {
-        if (!selectionWorkingImage) return
-        const { width, height } = selectionWorkingImage
-        const canvas = document.createElement('canvas')
-        canvas.width = width
-        canvas.height = height
-        const ctx = canvas.getContext('2d')
-        if (ctx) {
-            ctx.fillStyle = `rgba(0,0,0,${0.3 * (1 - maskConfig.opacity)})`
-            ctx.fillRect(0, 0, width, height)
-        }
-        offscreenOverlayRef.current = canvas
-        isDirtyRef.current = true
-    }, [selectionWorkingImage, maskConfig.opacity])
-
-    const drawMask = useCallback(() => {
-        const canvas = canvasRef.current
-        const mask = maskRef.current
-        if (!canvas || !selectionWorkingImage || !mask) return
-
-        const ctx = canvas.getContext('2d')
-        if (!ctx) return
-
-        const { width, height } = selectionWorkingImage
-        if (canvas.width !== width) {
-            canvas.width = width
-            canvas.height = height
-        }
-
-        // 1. Draw fabric context and clip to hoop bounds.
-        ctx.fillStyle = `rgb(${fabricSetup.color.r}, ${fabricSetup.color.g}, ${fabricSetup.color.b})`
-        ctx.fillRect(0, 0, width, height)
-        ctx.save()
-        applyHoopClip(ctx, fabricSetup.hoop.shape, width, height)
-
-        // 2. Draw original working image
-        ctx.imageSmoothingEnabled = true
-        ctx.imageSmoothingQuality = 'high'
-        ctx.putImageData(selectionWorkingImage, 0, 0)
-
-        // 3. Draw mask overlay (Blue tint for stitched area)
-        const maskImgData = ctx.createImageData(width, height)
-        const alpha = Math.round(maskConfig.opacity * 255)
-
-        for (let i = 0; i < mask.length; i++) {
-            const isMasked = mask[i] === 1
-            const idx = i * 4
-            if (isMasked) {
-                maskImgData.data[idx] = 0
-                maskImgData.data[idx + 1] = 120
-                maskImgData.data[idx + 2] = 255
-                maskImgData.data[idx + 3] = alpha
-            } else {
-                maskImgData.data[idx + 3] = 0
-            }
-        }
-
-        // Put mask overlay
-        const tempCanvas = document.createElement('canvas')
-        tempCanvas.width = width
-        tempCanvas.height = height
-        tempCanvas.getContext('2d')?.putImageData(maskImgData, 0, 0)
-        ctx.drawImage(tempCanvas, 0, 0)
-
-        // 4. Draw semi-transparent dimming over fabric area
-        if (offscreenOverlayRef.current) {
-            ctx.save()
-            // Draw the full dimming overlay
-            ctx.drawImage(offscreenOverlayRef.current, 0, 0)
-
-            // Now REMOVE the dimming where mask is 1 (destination-out)
-            ctx.globalCompositeOperation = 'destination-out'
-            const clearData = ctx.createImageData(width, height)
-            for (let i = 0; i < mask.length; i++) {
-                if (mask[i] === 1) clearData.data[i * 4 + 3] = 255
-            }
-            const clearCanvas = document.createElement('canvas')
-            clearCanvas.width = width
-            clearCanvas.height = height
-            clearCanvas.getContext('2d')?.putImageData(clearData, 0, 0)
-            ctx.drawImage(clearCanvas, 0, 0)
-
-            ctx.restore()
-        }
-
-        ctx.restore()
-
-        isDirtyRef.current = false
-    }, [selectionWorkingImage, maskConfig.opacity, fabricSetup.color, fabricSetup.hoop.shape])
-
-    // rAF loop for smooth rendering
-    useEffect(() => {
-        let frameId: number
-        const loop = () => {
-            if (isDirtyRef.current) {
-                drawMask()
-            }
-            frameId = requestAnimationFrame(loop)
-        }
-        frameId = requestAnimationFrame(loop)
-        return () => cancelAnimationFrame(frameId)
-    }, [drawMask])
-
-    const handlePointerUpdate = (e: React.PointerEvent<HTMLCanvasElement>) => {
-        if (!isDrawing || !selectionWorkingImage || !selection || !maskRef.current) return
-
-        const canvas = canvasRef.current
-        if (!canvas) return
-
-        const rect = canvas.getBoundingClientRect()
-        const scaleX = canvas.width / rect.width
-        const scaleY = canvas.height / rect.height
-
-        const x = Math.floor((e.clientX - rect.left) * scaleX)
-        const y = Math.floor((e.clientY - rect.top) * scaleY)
-
-        if (!isInsideHoop(x, y, canvas.width, canvas.height, fabricSetup.hoop.shape)) return
-
-        const radius = Math.max(1, Math.floor(maskConfig.brushSize / (rect.width / canvas.width) / 2))
-        const mask = maskRef.current
-        const val = tool === 'brush' ? 1 : 0
-        const width = canvas.width
-        const height = canvas.height
-
-        let changed = false
-        for (let dy = -radius; dy <= radius; dy++) {
-            for (let dx = -radius; dx <= radius; dx++) {
-                const distSq = dx * dx + dy * dy
-                if (distSq <= radius * radius) {
-                    const nx = x + dx
-                    const ny = y + dy
-                    if (nx >= 0 && nx < width && ny >= 0 && ny < height) {
-                        const idx = ny * width + nx
-                        if (mask[idx] !== val) {
-                            mask[idx] = val
-                            changed = true
-                        }
-                    }
-                }
-            }
-        }
-
-        if (changed) {
-            isDirtyRef.current = true
-        }
-    }
-
-    const commitMask = () => {
-        if (maskRef.current && selection) {
-            setSelection(SelectionArtifactModel.updateMask(selection, new Uint8Array(maskRef.current)))
-        }
+    const handleCommit = (finalMask: Uint8Array) => {
+        if (!selection) return
+        setSelection(SelectionArtifactModel.updateMask(selection, finalMask))
     }
 
     const handleAutoSubject = () => {
         if (!selectionWorkingImage || !selection) return
         const { width, height } = selectionWorkingImage
         const newMask = new Uint8Array(width * height).fill(0)
-        for (let y = Math.floor(height * 0.2); y < height * 0.8; y++) {
-            for (let x = Math.floor(width * 0.2); x < width * 0.8; x++) {
+        // Simple center-weighted "Magic" heuristic for initial view
+        for (let y = Math.floor(height * 0.25); y < height * 0.75; y++) {
+            for (let x = Math.floor(width * 0.25); x < width * 0.75; x++) {
                 newMask[y * width + x] = 1
             }
         }
-        maskRef.current = newMask
-        isDirtyRef.current = true
-        commitMask()
+        handleCommit(newMask)
     }
 
     const handleInvert = () => {
-        if (!maskRef.current) return
-        const mask = maskRef.current
-        for (let i = 0; i < mask.length; i++) {
-            mask[i] = mask[i] === 1 ? 0 : 1
+        if (!selection) return
+        const newMask = new Uint8Array(selection.mask.length)
+        for (let i = 0; i < selection.mask.length; i++) {
+            newMask[i] = selection.mask[i] === 1 ? 0 : 1
         }
-        isDirtyRef.current = true
-        commitMask()
+        handleCommit(newMask)
     }
 
-    if (!selectionWorkingImage) return null
+    const handleClearAll = () => {
+        if (!selection) return
+        handleCommit(new Uint8Array(selection.mask.length).fill(0))
+    }
+
+    const handleSelectAll = () => {
+        if (!selection) return
+        handleCommit(new Uint8Array(selection.mask.length).fill(1))
+    }
+
+    if (!selectionWorkingImage || !selection || !referencePlacement) {
+        return (
+            <div className="flex h-full w-full items-center justify-center bg-bg">
+                <div className="flex flex-col items-center gap-4">
+                    <div className="w-8 h-8 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] text-fg-subtle">
+                        Initializing Studio Engine
+                    </span>
+                </div>
+            </div>
+        )
+    }
 
     return (
-        <div className="flex flex-col h-full bg-gray-50 overflow-hidden">
-            <div className="flex-1 flex overflow-hidden">
-                {/* Sidebar Controls */}
-                <div className="w-64 bg-white border-r border-gray-200 p-6 flex flex-col space-y-6">
-                    <div>
-                        <h3 className="text-sm font-semibold text-gray-900 mb-4 uppercase tracking-wider">Tools</h3>
-                        <div className="grid grid-cols-2 gap-2">
-                            <button
+        <div className="flex h-full w-full overflow-hidden bg-bg">
+            {/* Sidebar: Masking tools */}
+            <div className="w-[340px] flex-shrink-0 border-r border-border bg-surface flex flex-col overflow-y-auto">
+                <div className="p-6 space-y-8">
+                    <header>
+                        <h2 className="text-xl font-bold tracking-tight text-fg">Define Stitch Area</h2>
+                        <p className="text-sm text-fg-muted">Highlight the areas of your design that should be stitched.</p>
+                    </header>
+
+                    <section className="space-y-6">
+                        <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-fg-subtle">Selection Tool</h3>
+                        <div className="grid grid-cols-2 gap-3">
+                            <Button
+                                variant={tool === 'brush' ? 'primary' : 'secondary'}
+                                className={`h-20 flex-col gap-2 rounded-2xl transition-all ${tool === 'brush' ? 'shadow-lg ring-1 ring-primary/20' : ''}`}
                                 onClick={() => setTool('brush')}
-                                className={`flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all ${tool === 'brush' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-100 text-gray-500 hover:border-gray-200'
-                                    }`}
                             >
-                                <div className="text-xl mb-1">🖌️</div>
-                                <span className="text-xs font-medium">Brush</span>
-                            </button>
-                            <button
+                                <span className="text-2xl">🖌️</span>
+                                <span className="text-[10px] font-bold uppercase tracking-widest">Brush</span>
+                            </Button>
+                            <Button
+                                variant={tool === 'eraser' ? 'primary' : 'secondary'}
+                                className={`h-20 flex-col gap-2 rounded-2xl transition-all ${tool === 'eraser' ? 'shadow-lg ring-1 ring-primary/20' : ''}`}
                                 onClick={() => setTool('eraser')}
-                                className={`flex flex-col items-center justify-center p-3 rounded-lg border-2 transition-all ${tool === 'eraser' ? 'border-blue-500 bg-blue-50 text-blue-700' : 'border-gray-100 text-gray-500 hover:border-gray-200'
-                                    }`}
                             >
-                                <div className="text-xl mb-1">🧽</div>
-                                <span className="text-xs font-medium">Eraser</span>
-                            </button>
+                                <span className="text-2xl">🧽</span>
+                                <span className="text-[10px] font-bold uppercase tracking-widest">Eraser</span>
+                            </Button>
                         </div>
-                    </div>
 
-                    <div className="space-y-4">
-                        <div>
-                            <div className="flex justify-between text-xs font-medium text-gray-500 mb-2">
-                                <span>Brush Size</span>
-                                <span>{maskConfig.brushSize}px</span>
+                        <div className="space-y-6 pt-4">
+                            <div className="space-y-3">
+                                <div className="flex justify-between">
+                                    <span className="text-xs font-medium text-fg-muted">Brush Diameter</span>
+                                    <span className="text-[10px] font-mono text-fg-subtle">{maskConfig.brushSize}px</span>
+                                </div>
+                                <Input
+                                    variant="slider"
+                                    min={5} max={150} step={1}
+                                    value={maskConfig.brushSize}
+                                    onChange={(e) => setMaskConfig({ brushSize: parseInt(e.target.value) })}
+                                />
                             </div>
-                            <input
-                                type="range"
-                                min="5"
-                                max="100"
-                                value={maskConfig.brushSize}
-                                onChange={(e) => setMaskConfig({ brushSize: parseInt(e.target.value) })}
-                                className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                            />
-                        </div>
-                        <div>
-                            <div className="flex justify-between text-xs font-medium text-gray-500 mb-2">
-                                <span>Mask Opacity</span>
-                                <span>{Math.round(maskConfig.opacity * 100)}%</span>
+                            <div className="space-y-3">
+                                <div className="flex justify-between">
+                                    <span className="text-xs font-medium text-fg-muted">Overlay Tint</span>
+                                    <span className="text-[10px] font-mono text-fg-subtle">{Math.round(maskConfig.opacity * 100)}%</span>
+                                </div>
+                                <Input
+                                    variant="slider"
+                                    min={0.1} max={1} step={0.01}
+                                    value={maskConfig.opacity}
+                                    onChange={(e) => setMaskConfig({ opacity: parseFloat(e.target.value) })}
+                                />
                             </div>
-                            <input
-                                type="range"
-                                min="0"
-                                max="1"
-                                step="0.01"
-                                value={maskConfig.opacity}
-                                onChange={(e) => setMaskConfig({ opacity: parseFloat(e.target.value) })}
-                                className="w-full h-1.5 bg-gray-200 rounded-lg appearance-none cursor-pointer accent-blue-600"
-                            />
                         </div>
-                    </div>
+                    </section>
 
-                    <div className="pt-4 border-t border-gray-100 space-y-2">
-                        <button
-                            onClick={() => {
-                                if (!maskRef.current) return
-                                maskRef.current.fill(1)
-                                isDirtyRef.current = true
-                                commitMask()
-                            }}
-                            className="w-full text-left px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded"
-                        >
-                            Select All
-                        </button>
-                        <button
-                            onClick={() => {
-                                if (!maskRef.current) return
-                                maskRef.current.fill(0)
-                                isDirtyRef.current = true
-                                commitMask()
-                            }}
-                            className="w-full text-left px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded"
-                        >
-                            Clear All
-                        </button>
-                        <button
-                            onClick={handleInvert}
-                            className="w-full text-left px-3 py-2 text-sm text-gray-600 hover:bg-gray-50 rounded"
-                        >
-                            Invert Mask
-                        </button>
-                    </div>
+                    <section className="space-y-2.5 pt-6 border-t border-border/50">
+                        <div className="grid grid-cols-2 gap-2.5">
+                            <Button variant="secondary" size="sm" onClick={handleSelectAll} className="h-9 text-[9px] uppercase font-bold tracking-widest">Select All</Button>
+                            <Button variant="secondary" size="sm" onClick={handleClearAll} className="h-9 text-[9px] uppercase font-bold tracking-widest">Clear All</Button>
+                        </div>
+                        <Button variant="secondary" size="sm" onClick={handleInvert} className="w-full h-9 text-[9px] uppercase font-bold tracking-widest">Invert Selection</Button>
+                    </section>
 
-                    <button
-                        onClick={handleAutoSubject}
-                        className="w-full flex items-center justify-center space-x-2 px-4 py-3 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors"
-                    >
-                        <span>✨</span>
-                        <span>Auto Subject</span>
-                    </button>
-                </div>
-
-                {/* Canvas Area */}
-                <div className="flex-1 bg-gray-200 flex items-center justify-center p-8 overflow-hidden">
-                    <div className="relative bg-white shadow-2xl rounded-lg overflow-hidden flex items-center justify-center max-w-full max-h-full aspect-square">
-                        <canvas
-                            ref={canvasRef}
-                            onPointerDown={(e) => {
-                                setIsDrawing(true)
-                                handlePointerUpdate(e)
-                                e.currentTarget.setPointerCapture(e.pointerId)
-                            }}
-                            onPointerMove={handlePointerUpdate}
-                            onPointerUp={(e) => {
-                                setIsDrawing(false)
-                                commitMask()
-                                e.currentTarget.releasePointerCapture(e.pointerId)
-                            }}
-                            onPointerCancel={(e) => {
-                                setIsDrawing(false)
-                                commitMask()
-                                e.currentTarget.releasePointerCapture(e.pointerId)
-                            }}
-                            onPointerLeave={() => {
-                                // Only commit if we were actually drawing
-                                if (isDrawing) {
-                                    setIsDrawing(false)
-                                    commitMask()
-                                }
-                            }}
-                            className="max-w-full max-h-full cursor-crosshair touch-none"
-                            style={{
-                                width: 'auto',
-                                height: '500px' // Practical default
-                            }}
-                        />
+                    <div className="flex-1 flex flex-col justify-end gap-3 pb-4">
+                        <Button
+                            onClick={handleAutoSubject}
+                            className="w-full h-12 text-[10px] font-bold tracking-[0.2em] uppercase bg-gradient-to-r from-indigo-600 to-violet-600 hover:from-indigo-700 hover:to-violet-700 text-white shadow-xl border-0"
+                        >
+                            ✨ Smart Selection
+                        </Button>
+                        <div className="flex gap-3">
+                            <Button
+                                className="flex-1 h-12 text-sm font-bold tracking-tight"
+                                variant="secondary"
+                                onClick={() => setWorkflowStage('Reference')}
+                            >
+                                Back
+                            </Button>
+                            <Button
+                                className="flex-[2] h-12 text-sm font-bold tracking-tight shadow-xl"
+                                variant="primary"
+                                onClick={() => setWorkflowStage('Build')}
+                            >
+                                Continue to Build
+                            </Button>
+                        </div>
                     </div>
                 </div>
             </div>
 
-            {/* Footer Navigation */}
-            <div className="bg-white border-t border-gray-200 px-8 py-4 flex items-center justify-between">
-                <div className="text-sm text-gray-500">
-                    {tool === 'brush' ? 'Paint the areas you want to stitch' : 'Erase areas that should be fabric'}
-                </div>
-                <div className="flex space-x-4">
-                    <button
-                        onClick={() => setWorkflowStage('Reference')}
-                        className="px-6 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50"
-                    >
-                        Back
-                    </button>
-                    <button
-                        onClick={() => setWorkflowStage('Build')}
-                        className="px-8 py-2 text-sm font-medium text-white bg-blue-600 rounded-lg hover:bg-blue-700 shadow-lg shadow-blue-200 transition-all transform hover:-translate-y-0.5"
-                    >
-                        Continue to Build
-                    </button>
+            {/* Main View: Studio Preview with Alignment Persistence */}
+            <div className="flex-1 bg-surface-2 relative flex items-center justify-center p-12 overflow-hidden shadow-inner">
+                <StudioPreview fabricSetup={fabricSetup}>
+                    <MaskLayer
+                        image={selectionWorkingImage}
+                        mask={selection.mask}
+                        placement={referencePlacement}
+                        config={maskConfig}
+                        tool={tool}
+                        onMaskChange={() => { }} // Store update deferred to commit for performance
+                        onCommit={(finalMask) => handleCommit(finalMask)}
+                    />
+                </StudioPreview>
+
+                {/* Footnote */}
+                <div className="absolute bottom-12 right-12 px-4 py-2 bg-white/50 backdrop-blur-md rounded-lg border border-white/20 pointer-events-none">
+                    <span className="text-[10px] font-bold text-fg-subtle uppercase tracking-widest">
+                        Assembly Mode: Selection
+                    </span>
                 </div>
             </div>
         </div>
     )
-}
-
-function applyHoopClip(
-    ctx: CanvasRenderingContext2D,
-    shape: 'round' | 'oval' | 'square',
-    width: number,
-    height: number
-) {
-    ctx.beginPath()
-    if (shape === 'round') {
-        const radius = Math.min(width, height) / 2
-        ctx.arc(width / 2, height / 2, radius, 0, Math.PI * 2)
-    } else if (shape === 'oval') {
-        ctx.ellipse(width / 2, height / 2, width / 2, height / 2, 0, 0, Math.PI * 2)
-    } else {
-        ctx.rect(0, 0, width, height)
-    }
-    ctx.clip()
-}
-
-function isInsideHoop(
-    x: number,
-    y: number,
-    width: number,
-    height: number,
-    shape: 'round' | 'oval' | 'square'
-) {
-    if (shape === 'square') return true
-    if (shape === 'round') {
-        const radius = Math.min(width, height) / 2
-        const dx = x - width / 2
-        const dy = y - height / 2
-        return (dx * dx) + (dy * dy) <= radius * radius
-    }
-    const nx = (x - width / 2) / (width / 2)
-    const ny = (y - height / 2) / (height / 2)
-    return (nx * nx) + (ny * ny) <= 1
 }
