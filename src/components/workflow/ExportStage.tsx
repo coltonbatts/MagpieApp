@@ -6,7 +6,7 @@ import { ExportMenu } from '../ExportMenu'
 import { Button, SegmentedControl } from '@/components/ui'
 
 export function ExportStage() {
-    const { pattern } = usePatternStore()
+    const { pattern, compositionLocked } = usePatternStore()
     const { setWorkflowStage } = useUIStore()
 
     const [activeTab, setActiveTab] = useState<'finished' | 'pattern'>('pattern')
@@ -20,6 +20,13 @@ export function ExportStage() {
                         <header>
                             <h2 className="text-xl font-bold tracking-tight text-fg">Export & Share</h2>
                             <p className="text-sm text-fg-muted">Finalize your project and download assets.</p>
+                            {compositionLocked && (
+                                <div className="mt-3 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                                        Composition Locked
+                                    </span>
+                                </div>
+                            )}
                         </header>
 
                         <section className="space-y-6">
@@ -62,7 +69,7 @@ export function ExportStage() {
                     <Button
                         className="w-full h-12 text-sm font-bold tracking-tight"
                         variant="secondary"
-                        onClick={() => setWorkflowStage('Build')}
+                        onClick={() => setWorkflowStage('Build', { source: 'cta' })}
                     >
                         Back to Build
                     </Button>
@@ -89,6 +96,15 @@ export function ExportStage() {
                             </span>
                         </div>
                     </div>
+                    {compositionLocked && (
+                        <div className="absolute top-6 left-6 pointer-events-none">
+                            <div className="px-3 py-1.5 bg-emerald-50/90 backdrop-blur-md rounded-full border border-emerald-200 shadow-lg">
+                                <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">
+                                    Composition Locked
+                                </span>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

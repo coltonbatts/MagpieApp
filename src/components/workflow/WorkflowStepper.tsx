@@ -11,8 +11,8 @@ const STAGES: { id: WorkflowStage; label: string }[] = [
 ]
 
 export function WorkflowStepper() {
-  const { workflowStage, setWorkflowStage } = useUIStore()
-  const { originalImage, normalizedImage, selectionWorkingImage } = usePatternStore()
+  const { workflowStage, workflowTransition, setWorkflowStage } = useUIStore()
+  const { originalImage, normalizedImage, selectionWorkingImage, setCompositionLocked } = usePatternStore()
 
   return (
     <nav className="border-b border-border bg-surface/95 backdrop-blur">
@@ -25,6 +25,7 @@ export function WorkflowStepper() {
           <div className="flex items-center gap-2">
             {STAGES.map((stage, idx) => {
               const isActive = workflowStage === stage.id
+              const isPending = workflowTransition?.to === stage.id
               const isDisabled =
                 stage.id === 'Select'
                   ? !originalImage || !selectionWorkingImage
@@ -33,11 +34,19 @@ export function WorkflowStepper() {
               return (
                 <div key={stage.id} className="flex items-center">
                   <button
-                    onClick={() => !isDisabled && setWorkflowStage(stage.id)}
+                    onClick={() => {
+                      if (isDisabled) return
+                      if (workflowStage === 'Select' && (stage.id === 'Build' || stage.id === 'Export')) {
+                        setCompositionLocked(true)
+                      }
+                      setWorkflowStage(stage.id, { source: 'stepper' })
+                    }}
                     disabled={isDisabled}
-                    className={`relative inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium transition-colors duration-180 ease-standard focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:ring-offset-2 focus-visible:ring-offset-bg ${
+                    className={`relative inline-flex h-8 items-center rounded-md border px-3 text-sm font-medium transition-all duration-180 ease-standard active:scale-[0.985] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/30 focus-visible:ring-offset-2 focus-visible:ring-offset-bg ${
                       isActive
                         ? 'border-border-strong bg-accent-soft text-fg'
+                        : isPending
+                          ? 'border-border-strong/80 bg-surface-2 text-fg animate-[stepper-settle_420ms_ease-out]'
                         : isDisabled
                           ? 'cursor-not-allowed border-transparent text-fg-subtle/60'
                           : 'border-transparent text-fg-muted hover:bg-surface-2 hover:text-fg'

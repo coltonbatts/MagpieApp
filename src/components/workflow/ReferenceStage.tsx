@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react'
+import React, { useEffect, useState, useCallback, useRef } from 'react'
 import { UploadZone } from '@/components/UploadZone'
 import { Button, Slider } from '@/components/ui'
 import { StudioPreview } from './StudioPreview'
@@ -8,8 +8,9 @@ import { fitImageInHoop } from '@/lib/hoop-layout'
 import type { ReferencePlacement } from '@/types'
 
 export function ReferenceStage() {
-  const { originalImage, fabricSetup, referencePlacement, setReferencePlacement } = usePatternStore()
+  const { originalImage, fabricSetup, referencePlacement, compositionLocked, setReferencePlacement } = usePatternStore()
   const { setWorkflowStage } = useUIStore()
+  const canEditComposition = !compositionLocked
 
   // Track if we've auto-fitted since the image changed
   const [lastImageRef, setLastImageRef] = useState<ImageBitmap | null>(null)
@@ -40,6 +41,7 @@ export function ReferenceStage() {
   }, [originalImage, lastImageRef, setReferencePlacement])
 
   const handlePointerDown = useCallback((e: React.PointerEvent) => {
+    if (!canEditComposition) return
     if (!localPlacement) return
     const container = e.currentTarget
     setIsDragging(true)
@@ -50,9 +52,10 @@ export function ReferenceStage() {
       y: e.clientY,
       placement: { ...localPlacement }
     })
-  }, [localPlacement])
+  }, [canEditComposition, localPlacement])
 
   const handlePointerMove = useCallback((e: React.PointerEvent) => {
+    if (!canEditComposition) return
     if (!isDragging || !dragStart || !localPlacement) return
 
     const container = e.currentTarget
@@ -71,7 +74,7 @@ export function ReferenceStage() {
     setLocalPlacement(newPlacement)
     // Also update store for persistence
     setReferencePlacement(newPlacement)
-  }, [isDragging, dragStart, localPlacement, setReferencePlacement])
+  }, [canEditComposition, isDragging, dragStart, localPlacement, setReferencePlacement])
 
   const handlePointerUp = useCallback((e: React.PointerEvent) => {
     setIsDragging(false)
@@ -97,6 +100,7 @@ export function ReferenceStage() {
   }, [setReferencePlacement])
 
   const handleScaleChange = useCallback((newWidth: number) => {
+    if (!canEditComposition) return
     if (!localPlacement || !originalImage) return
 
     // Scale from the center
@@ -114,9 +118,10 @@ export function ReferenceStage() {
 
     // Instant local update
     updateLocalPlacement(newPlacement)
-  }, [localPlacement, originalImage, updateLocalPlacement])
+  }, [canEditComposition, localPlacement, originalImage, updateLocalPlacement])
 
   const handleScaleCommit = useCallback((newWidth: number) => {
+    if (!canEditComposition) return
     if (!localPlacement || !originalImage) return
 
     const centerX = localPlacement.x + localPlacement.width / 2
@@ -132,23 +137,17 @@ export function ReferenceStage() {
     }
 
     commitPlacement(newPlacement)
-  }, [localPlacement, originalImage, commitPlacement])
+  }, [canEditComposition, localPlacement, originalImage, commitPlacement])
 
   const handleReset = useCallback(() => {
+    if (!canEditComposition) return
     if (originalImage) {
       const resetPlacement = fitImageInHoop(originalImage.width, originalImage.height)
       setLocalPlacement(resetPlacement)
       setReferencePlacement(resetPlacement)
     }
-  }, [originalImage, setReferencePlacement])
+  }, [canEditComposition, originalImage, setReferencePlacement])
   
-  // Calculate scale percentage for display
-  const scalePercentage = useMemo(() => {
-    if (!localPlacement) return 0
-    // Calculate percentage based on initial fit (width = 1.0 = 100%)
-    return Math.round(localPlacement.width * 100)
-  }, [localPlacement])
-
   return (
     <div className="flex h-full w-full overflow-hidden bg-bg">
       {/* Sidebar: placement controls */}
@@ -178,16 +177,22 @@ export function ReferenceStage() {
                   onChange={handleScaleChange}
                   onChangeCommit={handleScaleCommit}
                   formatValue={(v) => `${Math.round(v * 100)}%`}
+                  disabled={!canEditComposition}
                 />
 
                 <div className="space-y-4 pt-4 border-t border-border/50">
                   <div className="flex justify-between items-center">
                     <span className="text-[10px] font-bold uppercase tracking-widest text-fg-subtle">Direct Interaction</span>
-                    <Button variant="secondary" size="sm" className="h-5 text-[9px] px-1.5 uppercase font-bold" onClick={handleReset}>Reset to Fit</Button>
+                    <Button variant="secondary" size="sm" className="h-5 text-[9px] px-1.5 uppercase font-bold" onClick={handleReset} disabled={!canEditComposition}>Reset to Fit</Button>
                   </div>
                   <p className="text-[10px] text-fg-muted leading-relaxed">
                     Click and drag the image in the studio preview to move it. Precision scale controls above.
                   </p>
+                  {compositionLocked && (
+                    <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                      Composition locked
+                    </p>
+                  )}
                 </div>
               </div>
             </section>
@@ -198,7 +203,7 @@ export function ReferenceStage() {
               className="w-full h-12 text-base font-bold tracking-tight shadow-lg"
               variant="primary"
               disabled={!originalImage}
-              onClick={() => setWorkflowStage('Select')}
+              onClick={() => setWorkflowStage('Select', { source: 'cta' })}
             >
               Confirm Placement
             </Button>
@@ -208,10 +213,10 @@ export function ReferenceStage() {
 
       {/* Main View: Visual Preview */}
       <div
-        className={`flex-1 bg-surface-2 relative flex items-center justify-center p-12 overflow-hidden shadow-inner cursor-move ${isDragging ? 'cursor-grabbing' : 'cursor-move'}`}
-        onPointerDown={handlePointerDown}
-        onPointerMove={handlePointerMove}
-        onPointerUp={handlePointerUp}
+        className={`flex-1 bg-surface-2 relative flex items-center justify-center p-12 overflow-hidden shadow-inner ${canEditComposition ? `cursor-move ${isDragging ? 'cursor-grabbing' : 'cursor-move'}` : 'cursor-default'}`}
+        onPointerDown={canEditComposition ? handlePointerDown : undefined}
+        onPointerMove={canEditComposition ? handlePointerMove : undefined}
+        onPointerUp={canEditComposition ? handlePointerUp : undefined}
       >
         <StudioPreview fabricSetup={fabricSetup}>
           {originalImage && localPlacement && (

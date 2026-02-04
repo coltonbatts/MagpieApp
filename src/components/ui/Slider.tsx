@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, useEffect, type ChangeEvent, type MouseEvent, type TouchEvent } from 'react'
+import { useCallback, useRef, useState, useEffect, type ChangeEvent } from 'react'
 import { cn } from './cn'
 
 export interface SliderProps {

@@ -174,7 +174,7 @@ export function ControlPanel() {
       <div className="space-y-3 border-t border-border bg-surface-2/65 p-5">
         {workflowStage === 'Build' ? (
           <Button
-            onClick={() => setWorkflowStage('Export')}
+            onClick={() => setWorkflowStage('Export', { source: 'cta' })}
             variant="primary"
             className="h-10 w-full font-semibold"
           >
@@ -185,7 +185,7 @@ export function ControlPanel() {
         )}
 
         <Button
-          onClick={() => setWorkflowStage('Select')}
+          onClick={() => setWorkflowStage('Select', { source: 'cta' })}
           variant="ghost"
           className="h-8 w-full text-sm text-fg-muted hover:text-fg"
         >

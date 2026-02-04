@@ -31,6 +31,17 @@ export function createViewport(
   return viewport
 }
 
+export function setViewportInteractionEnabled(viewport: Viewport, enabled: boolean): void {
+  const pluginNames = ['drag', 'pinch', 'wheel', 'decelerate']
+  for (const pluginName of pluginNames) {
+    if (enabled) {
+      viewport.plugins.resume(pluginName)
+    } else {
+      viewport.plugins.pause(pluginName)
+    }
+  }
+}
+
 export function fitViewportToWorld(
   viewport: Viewport,
   worldWidth: number,

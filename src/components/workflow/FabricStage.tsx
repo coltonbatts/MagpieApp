@@ -90,7 +90,7 @@ export function FabricStage() {
     
     // Small delay to ensure state is committed before transition
     requestAnimationFrame(() => {
-      setWorkflowStage('Reference')
+      setWorkflowStage('Reference', { source: 'cta' })
     })
   }, [localFabricSetup, hsl, setFabricSetup, setWorkflowStage])
 
@@ -343,4 +343,3 @@ function HSLSlider({
     />
   )
 }
-

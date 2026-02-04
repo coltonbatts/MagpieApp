@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react'
+import { useState, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
@@ -25,6 +25,7 @@ export function SelectStage() {
         setMaskConfig,
         fabricSetup,
         referencePlacement,
+        setCompositionLocked,
     } = usePatternStore()
     const { setWorkflowStage } = useUIStore()
     const [tool, setTool] = useState<'brush' | 'eraser' | 'magic'>('brush')
@@ -268,14 +269,17 @@ export function SelectStage() {
                             <Button
                                 className="flex-1 h-12 text-sm font-bold tracking-tight"
                                 variant="secondary"
-                                onClick={() => setWorkflowStage('Reference')}
+                                onClick={() => setWorkflowStage('Reference', { source: 'cta' })}
                             >
                                 Back
                             </Button>
                             <Button
                                 className="flex-[2] h-12 text-sm font-bold tracking-tight shadow-xl"
                                 variant="primary"
-                                onClick={() => setWorkflowStage('Build')}
+                                onClick={() => {
+                                    setCompositionLocked(true)
+                                    setWorkflowStage('Build', { source: 'cta' })
+                                }}
                             >
                                 Continue to Build
                             </Button>

@@ -12,11 +12,12 @@ import { ReferenceStage } from './components/workflow/ReferenceStage'
 import { SelectStage } from './components/workflow/SelectStage'
 import { BuildStage } from './components/workflow/BuildStage'
 import { ExportStage } from './components/workflow/ExportStage'
+import { StageTransitionLayer } from './components/workflow/StageTransitionLayer'
 import { processPattern } from './processing/process-pattern'
 import { incrementDevCounter } from './lib/dev-instrumentation'
 
 export default function App() {
-  const { normalizedImage, referenceId, selection, processingConfig, setPattern } = usePatternStore()
+  const { normalizedImage, referenceId, selection, processingConfig, setPattern, isProcessing, setIsProcessing } = usePatternStore()
   const { workflowStage } = useUIStore()
   const [showDMCTester, setShowDMCTester] = useState(false)
   const isDev = import.meta.env.DEV
@@ -25,8 +26,6 @@ export default function App() {
     if (window.localStorage.getItem('magpie:runColorSanity') !== '1') return
     runPatternColorSanityTest()
   }, [isDev])
-
-  const [isProcessing, setIsProcessing] = useState(false)
 
   useEffect(() => {
     if (!normalizedImage) return
@@ -122,11 +121,12 @@ export default function App() {
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-white">
+      <StageTransitionLayer />
       {isProcessing && (
-        <div className="absolute inset-0 z-[100] bg-white/50 backdrop-blur-sm flex items-center justify-center pointer-events-none">
-          <div className="bg-white px-6 py-4 rounded-xl shadow-2xl border border-gray-100 flex items-center gap-4 animate-in fade-in zoom-in duration-300">
-            <div className="w-5 h-5 border-2 border-blue-600 border-t-transparent rounded-full animate-spin" />
-            <span className="text-sm font-semibold text-gray-800 tracking-tight">Processing Pattern...</span>
+        <div className="absolute inset-x-0 top-0 z-[100] flex justify-center pointer-events-none pt-16">
+          <div className="bg-surface/95 px-5 py-2.5 rounded-full shadow-xl border border-border flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-200">
+            <div className="w-1.5 h-1.5 rounded-full bg-fg animate-pulse" />
+            <span className="text-[11px] font-bold uppercase tracking-[0.18em] text-fg-subtle">Processing Pattern</span>
           </div>
         </div>
       )}
@@ -144,7 +144,9 @@ export default function App() {
           </div>
         )}
 
-        {renderStage()}
+        <div className={`stage-shell stage-shell--${workflowStage.toLowerCase()}`}>
+          {renderStage()}
+        </div>
       </main>
     </div>
   )

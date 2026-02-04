@@ -102,3 +102,65 @@
     }
   }
 }
+
+@keyframes stage-enter-fabric {
+  from { opacity: 0.985; transform: scale(0.998); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes stage-enter-reference {
+  from { opacity: 0.96; transform: translateY(6px) scale(0.998); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes stage-enter-select {
+  from { opacity: 0.95; transform: scale(0.9975); filter: saturate(0.95); }
+  to { opacity: 1; transform: scale(1); filter: saturate(1); }
+}
+
+@keyframes stage-enter-build {
+  from { opacity: 0.94; transform: translateY(4px) scale(0.997); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes stage-enter-export {
+  from { opacity: 0.92; transform: scale(0.996); filter: contrast(0.98); }
+  to { opacity: 1; transform: scale(1); filter: contrast(1); }
+}
+
+@keyframes transition-sweep {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(100%); }
+}
+
+@keyframes stepper-settle {
+  0% { transform: scale(1); }
+  45% { transform: scale(0.986); }
+  100% { transform: scale(1); }
+}
+
+.stage-shell {
+  height: 100%;
+  width: 100%;
+  transform-origin: center center;
+}
+
+.stage-shell--fabric {
+  animation: stage-enter-fabric 180ms var(--ease-standard);
+}
+
+.stage-shell--reference {
+  animation: stage-enter-reference 220ms var(--ease-standard);
+}
+
+.stage-shell--select {
+  animation: stage-enter-select 220ms var(--ease-standard);
+}
+
+.stage-shell--build {
+  animation: stage-enter-build 250ms var(--ease-standard);
+}
+
+.stage-shell--export {
+  animation: stage-enter-export 260ms var(--ease-standard);
+}
