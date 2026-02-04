@@ -3,10 +3,20 @@ export interface SaveDialogFilter {
   extensions: string[]
 }
 
+export interface OpenDialogFilter {
+  name: string
+  extensions: string[]
+}
+
 export interface SaveDialogOptions {
   defaultFileName: string
   title?: string
   filters?: SaveDialogFilter[]
+}
+
+export interface OpenDialogOptions {
+  title?: string
+  filters?: OpenDialogFilter[]
 }
 
 export interface FolderDialogOptions {
@@ -28,7 +38,9 @@ export interface FileWriteBatchItem extends FileWritePayload {}
 export interface PlatformAdapter {
   isDesktop: boolean
   selectSavePath: (options: SaveDialogOptions) => Promise<string | null>
+  selectOpenPath: (options?: OpenDialogOptions) => Promise<string | null>
   selectFolder: (options?: FolderDialogOptions) => Promise<string | null>
+  readFile: (path: string) => Promise<Uint8Array>
   writeFile: (payload: FileWritePayload) => Promise<void>
   writeFilesBatch: (items: FileWriteBatchItem[]) => Promise<void>
   openInFolder: (path: string) => Promise<void>

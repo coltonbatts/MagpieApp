@@ -1,7 +1,15 @@
+import { useEffect, useState } from 'react'
 import { Button, Panel, Select } from '@/components/ui'
 import type { HoopConfig } from '@/types'
 import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
+import { getPlatformAdapter } from '@/platform'
+import {
+  getRecentProjects,
+  loadProjectFromPath,
+  removeRecentProject,
+  type RecentProjectEntry,
+} from '@/project/persistence'
 
 const HOOP_PRESETS: HoopConfig[] = [
   { presetId: 'round-150', label: 'Round 150mm', shape: 'round', widthMm: 150, heightMm: 150 },
@@ -12,6 +20,52 @@ const HOOP_PRESETS: HoopConfig[] = [
 export function FabricStage() {
   const { fabricSetup, setFabricSetup } = usePatternStore()
   const { setWorkflowStage } = useUIStore()
+  const [recentProjects, setRecentProjects] = useState<RecentProjectEntry[]>([])
+  const [isDesktop, setIsDesktop] = useState(false)
+  const [resumeError, setResumeError] = useState<string | null>(null)
+  const [isResuming, setIsResuming] = useState(false)
+
+  useEffect(() => {
+    let mounted = true
+    void getPlatformAdapter().then((platform) => {
+      if (!mounted) return
+      setIsDesktop(platform.isDesktop)
+    })
+    setRecentProjects(getRecentProjects())
+    return () => {
+      mounted = false
+    }
+  }, [])
+
+  const refreshRecentProjects = () => {
+    setRecentProjects(getRecentProjects())
+  }
+
+  const handleOpenProject = async (path?: string) => {
+    try {
+      setResumeError(null)
+      setIsResuming(true)
+      const platform = await getPlatformAdapter()
+      const selectedPath = path ?? await platform.selectOpenPath({
+        title: 'Open Magpie project',
+        filters: [{ name: 'Magpie project', extensions: ['magpie'] }],
+      })
+
+      if (!selectedPath) return
+
+      await loadProjectFromPath(selectedPath)
+      refreshRecentProjects()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown project load failure.'
+      setResumeError(message)
+      if (path) {
+        removeRecentProject(path)
+        refreshRecentProjects()
+      }
+    } finally {
+      setIsResuming(false)
+    }
+  }
 
   const fabricHex = `#${fabricSetup.color.r.toString(16).padStart(2, '0')}${fabricSetup.color.g
     .toString(16)
@@ -114,6 +168,49 @@ export function FabricStage() {
               Continue to Reference
             </Button>
           </Panel>
+
+          {isDesktop && (
+            <Panel className="mt-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold text-fg">Recent Projects</h3>
+                  <p className="text-xs text-fg-muted">Resume from a saved `.magpie` file.</p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="secondary"
+                  onClick={() => void handleOpenProject()}
+                  disabled={isResuming}
+                >
+                  {isResuming ? 'Opening…' : 'Open Project'}
+                </Button>
+              </div>
+
+              {recentProjects.length === 0 ? (
+                <p className="text-xs text-fg-subtle">No recent projects yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {recentProjects.map((entry) => (
+                    <button
+                      key={entry.path}
+                      type="button"
+                      onClick={() => void handleOpenProject(entry.path)}
+                      className="w-full rounded-md border border-border bg-surface-2 px-3 py-2 text-left transition-colors hover:bg-surface"
+                      disabled={isResuming}
+                    >
+                      <div className="truncate text-sm font-medium text-fg">{entry.name}</div>
+                      <div className="truncate text-[11px] text-fg-subtle">{entry.path}</div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {resumeError && (
+                <p className="text-xs text-red-600">Failed to open project: {resumeError}</p>
+              )}
+            </Panel>
+          )}
         </div>
       </div>
     </div>

@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core'
 import type {
   FileWriteBatchItem,
   FileWritePayload,
+  OpenDialogOptions,
   FolderDialogOptions,
   PlatformAdapter,
   SaveDialogOptions,
@@ -21,10 +22,22 @@ async function selectSavePath(options: SaveDialogOptions): Promise<string | null
   })
 }
 
+async function selectOpenPath(options?: OpenDialogOptions): Promise<string | null> {
+  return invoke<string | null>('desktop_select_open_path', {
+    title: options?.title ?? null,
+    filters: (options?.filters ?? []) as DesktopDialogFilter[],
+  })
+}
+
 async function selectFolder(options?: FolderDialogOptions): Promise<string | null> {
   return invoke<string | null>('desktop_select_folder', {
     title: options?.title ?? null,
   })
+}
+
+async function readFile(path: string): Promise<Uint8Array> {
+  const bytes = await invoke<number[]>('desktop_read_file', { path })
+  return new Uint8Array(bytes)
 }
 
 async function writeFile(payload: FileWritePayload): Promise<void> {
@@ -52,7 +65,9 @@ async function openInFolder(path: string): Promise<void> {
 export const desktopPlatformAdapter: PlatformAdapter = {
   isDesktop: true,
   selectSavePath,
+  selectOpenPath,
   selectFolder,
+  readFile,
   writeFile,
   writeFilesBatch,
   openInFolder,

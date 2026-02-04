@@ -29,6 +29,8 @@ export async function getPlatformAdapter(): Promise<PlatformAdapter> {
 export type {
   FileWriteBatchItem,
   FileWritePayload,
+  OpenDialogFilter,
+  OpenDialogOptions,
   FolderDialogOptions,
   PlatformAdapter,
   PrintOptions,

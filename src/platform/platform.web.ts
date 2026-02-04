@@ -1,6 +1,7 @@
 import type {
   FileWriteBatchItem,
   FileWritePayload,
+  OpenDialogOptions,
   FolderDialogOptions,
   PlatformAdapter,
   SaveDialogOptions,
@@ -53,8 +54,14 @@ export const webPlatformAdapter: PlatformAdapter = {
   async selectSavePath(options: SaveDialogOptions): Promise<string | null> {
     return options.defaultFileName
   },
+  async selectOpenPath(_options?: OpenDialogOptions): Promise<string | null> {
+    return null
+  },
   async selectFolder(_options?: FolderDialogOptions): Promise<string | null> {
     return null
+  },
+  async readFile(_path: string): Promise<Uint8Array> {
+    throw new Error('Reading local files is not supported in the web adapter.')
   },
   writeFile,
   writeFilesBatch,

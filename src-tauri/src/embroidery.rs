@@ -508,7 +508,8 @@ fn kmeans_plus_plus_init(pixels: &[Lab<D65, f32>], k: usize) -> Vec<KMeansCenter
     let mut chosen_indices = HashSet::new();
 
     // First center: pick pixel closest to median luminance
-    let mut sorted_by_l: Vec<(usize, f32)> = pixels.iter().enumerate().map(|(i, p)| (i, p.l)).collect();
+    let mut sorted_by_l: Vec<(usize, f32)> =
+        pixels.iter().enumerate().map(|(i, p)| (i, p.l)).collect();
     sorted_by_l.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
     let first_idx = sorted_by_l[n / 2].0;
     centers.push(KMeansCenter::new(pixels[first_idx]));
@@ -619,7 +620,9 @@ fn remove_small_regions(
                             ) {
                                 let dist_a = current.difference(*a);
                                 let dist_b = current.difference(*b);
-                                dist_b.partial_cmp(&dist_a).unwrap_or(std::cmp::Ordering::Equal)
+                                dist_b
+                                    .partial_cmp(&dist_a)
+                                    .unwrap_or(std::cmp::Ordering::Equal)
                             } else {
                                 std::cmp::Ordering::Equal
                             }
@@ -779,9 +782,8 @@ pub fn process_pattern(
 
     // Build stitches array
     let markers = [
-        'S', 'O', 'T', '*', 'D', 'X', '+', '#', '%', '@',
-        'A', 'B', 'C', 'E', 'H', 'K', 'M', 'N', 'P', 'R',
-        'U', 'V', 'W', 'Y', 'Z', '0', '1', '2', '3', '4',
+        'S', 'O', 'T', '*', 'D', 'X', '+', '#', '%', '@', 'A', 'B', 'C', 'E', 'H', 'K', 'M', 'N',
+        'P', 'R', 'U', 'V', 'W', 'Y', 'Z', '0', '1', '2', '3', '4',
     ];
 
     let stitches: Vec<Stitch> = (0..n)
@@ -828,9 +830,11 @@ pub fn process_pattern(
         if stitch.dmc_code == "Fabric" {
             continue;
         }
-        let entry = legend_counts
-            .entry(stitch.dmc_code.clone())
-            .or_insert((0, stitch.hex.clone(), String::new()));
+        let entry = legend_counts.entry(stitch.dmc_code.clone()).or_insert((
+            0,
+            stitch.hex.clone(),
+            String::new(),
+        ));
         entry.0 += 1;
 
         // Find name for this code
@@ -903,9 +907,11 @@ mod tests {
         // Red should match to a red DMC color
         let red = rgb_to_lab([255, 0, 0]);
         let match_red = palette.find_closest(red);
-        assert!(match_red.name.to_lowercase().contains("red") ||
-                match_red.hex.to_uppercase().contains("E") ||
-                match_red.hex.to_uppercase().contains("C"));
+        assert!(
+            match_red.name.to_lowercase().contains("red")
+                || match_red.hex.to_uppercase().contains("E")
+                || match_red.hex.to_uppercase().contains("C")
+        );
 
         // Black should match to DMC 310
         let black = rgb_to_lab([0, 0, 0]);

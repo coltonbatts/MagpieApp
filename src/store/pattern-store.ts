@@ -1,8 +1,15 @@
 import { create } from 'zustand'
 import { Pattern } from '@/model/Pattern'
 import { PROCESSING } from '@/lib/constants'
+import {
+  applyManualEditsToPattern,
+  editsArrayFromMap,
+  mergeManualEdits,
+} from '@/model/manual-edits'
 import type {
   FabricSetup,
+  ManualStitchEdit,
+  ManualStitchEdits,
   ProcessingConfig,
   MaskConfig,
   ReferencePlacement,
@@ -20,6 +27,7 @@ interface PatternState {
   selection: SelectionArtifact | null
   maskConfig: MaskConfig
   pattern: Pattern | null
+  manualEdits: ManualStitchEdits
   processingConfig: ProcessingConfig
   isProcessing: boolean
   error: string | null
@@ -30,6 +38,9 @@ interface PatternState {
   setSelection: (selection: SelectionArtifact | null) => void
   setMaskConfig: (config: Partial<MaskConfig>) => void
   setPattern: (pattern: Pattern | null) => void
+  setManualEdits: (edits: ManualStitchEdit[]) => void
+  applyManualEdits: (edits: ManualStitchEdit[]) => void
+  clearManualEdits: () => void
   setProcessingConfig: (config: Partial<ProcessingConfig>) => void
   setIsProcessing: (isProcessing: boolean) => void
   setError: (error: string | null) => void
@@ -61,6 +72,7 @@ export const usePatternStore = create<PatternState>((set) => ({
     opacity: 0.5,
   },
   pattern: null,
+  manualEdits: {},
   processingConfig: {
     colorCount: 20,
     ditherMode: 'none',
@@ -89,6 +101,7 @@ export const usePatternStore = create<PatternState>((set) => ({
       selectionWorkingImage: selectionImage,
       referenceId: newReferenceId,
       selection: null,
+      manualEdits: {},
     })
   },
   setFabricSetup: (config) =>
@@ -130,6 +143,23 @@ export const usePatternStore = create<PatternState>((set) => ({
       maskConfig: { ...state.maskConfig, ...config },
     })),
   setPattern: (pattern) => set({ pattern }),
+  setManualEdits: (edits) =>
+    set((state) => {
+      const manualEdits = mergeManualEdits({}, edits)
+      return {
+        manualEdits,
+        pattern: state.pattern ? applyManualEditsToPattern(state.pattern, editsArrayFromMap(manualEdits)) : state.pattern,
+      }
+    }),
+  applyManualEdits: (edits) =>
+    set((state) => {
+      const manualEdits = mergeManualEdits(state.manualEdits, edits)
+      return {
+        manualEdits,
+        pattern: state.pattern ? applyManualEditsToPattern(state.pattern, editsArrayFromMap(manualEdits)) : state.pattern,
+      }
+    }),
+  clearManualEdits: () => set({ manualEdits: {} }),
   setProcessingConfig: (config) =>
     set((state) => ({
       processingConfig: { ...state.processingConfig, ...config },
@@ -147,6 +177,7 @@ export const usePatternStore = create<PatternState>((set) => ({
         referencePlacement: null,
         selection: null,
         pattern: null,
+        manualEdits: {},
         isProcessing: false,
         error: null,
       }

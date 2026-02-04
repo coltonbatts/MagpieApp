@@ -65,8 +65,8 @@ export class Pattern {
     const fabricIndices = this.getFabricIndices(options?.fabricConfig)
 
     this.stitches.forEach((stitch, i) => {
-      // If mask exists and this pixel is not masked, it's fabric
-      const isExplicitFabric = this.selection?.mask && this.selection.mask[i] === 0
+      // Fabric can come from the selection mask or from manual stitch edits.
+      const isExplicitFabric = stitch.dmcCode === 'Fabric' || (this.selection?.mask && this.selection.mask[i] === 0)
       const stitchHex = normalizeHex(stitch.hex)
 
       if (!isExplicitFabric) {
@@ -86,6 +86,16 @@ export class Pattern {
     const orderedHexes = paletteOrder.length
       ? paletteOrder.map((hex) => normalizeHex(hex)).filter((hex) => counts.has(hex))
       : Array.from(counts.keys())
+
+    if (paletteOrder.length) {
+      const known = new Set(orderedHexes)
+      counts.forEach((_, hex) => {
+        if (!known.has(hex)) {
+          known.add(hex)
+          orderedHexes.push(hex)
+        }
+      })
+    }
 
     const legend: LegendEntry[] = orderedHexes
       .map((hex) => {

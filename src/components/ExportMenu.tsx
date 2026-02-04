@@ -1,15 +1,23 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useExport } from '@/hooks/useExport'
 import { usePatternStore } from '@/store/pattern-store'
+import { useUIStore } from '@/store/ui-store'
 import { exportLegendCsv } from '@/exports/csv-export'
 import { generatePatternSVG } from '@/exports/pattern-svg-export'
+import { generateNativePatternPdf } from '@/exports/native-pdf-export'
 import { getPlatformAdapter } from '@/platform'
 import { generatePrintDocument } from '@/print/print-document'
+import { saveCurrentProjectToPath } from '@/project/persistence'
 import { Button, Input, Panel, Select } from './ui'
 
 function resolveDefaultPrintPageSize(): 'A4' | 'Letter' {
   const locale = typeof navigator !== 'undefined' ? navigator.language : 'en-US'
   return locale.startsWith('en-US') ? 'Letter' : 'A4'
+}
+
+function buildTimestampedName(extension: string): string {
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')
+  return `magpie-project-${stamp}.${extension}`
 }
 
 export function ExportMenu() {
@@ -22,13 +30,16 @@ export function ExportMenu() {
   const [isExportingPng, setIsExportingPng] = useState(false)
   const [isExportingCsv, setIsExportingCsv] = useState(false)
   const [isExportingSvg, setIsExportingSvg] = useState(false)
+  const [isExportingPdf, setIsExportingPdf] = useState(false)
+  const [isSavingProject, setIsSavingProject] = useState(false)
   const [isPrinting, setIsPrinting] = useState(false)
   const isDev = import.meta.env.DEV
   const pattern = usePatternStore((state) => state.pattern)
   const processingConfig = usePatternStore((state) => state.processingConfig)
+  const workflowStage = useUIStore((state) => state.workflowStage)
   const { canExport, exportCurrentPng } = useExport()
 
-  const exportDisabled = !canExport || isExportingPng || isExportingCsv || isExportingSvg || isPrinting
+  const exportDisabled = !canExport || isExportingPng || isExportingCsv || isExportingSvg || isExportingPdf || isSavingProject || isPrinting
 
   const shortcutHint = useMemo(() => {
     const isMac = typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform)
@@ -128,6 +139,66 @@ export function ExportMenu() {
     }
   }, [pattern, processingConfig])
 
+  const handleExportPdf = useCallback(async () => {
+    if (!pattern) return
+    try {
+      setExportError(null)
+      setStatusNote(null)
+      setIsExportingPdf(true)
+      const platform = await getPlatformAdapter()
+      if (!platform.isDesktop) {
+        throw new Error('Native PDF export is only available in the desktop app.')
+      }
+
+      const path = await platform.selectSavePath({
+        defaultFileName: buildTimestampedName('pdf'),
+        title: 'Save artisan PDF',
+        filters: [{ name: 'PDF document', extensions: ['pdf'] }],
+      })
+      if (!path) return
+
+      const legend = pattern.getLegend({
+        fabricConfig: {
+          fabricColor: processingConfig.fabricColor,
+          stitchThreshold: processingConfig.stitchThreshold,
+        },
+      })
+      const bytes = await generateNativePatternPdf(pattern, legend, 'Magpie Artisan Blueprint')
+      await platform.writeFile({ path, contents: bytes })
+      setStatusNote('Saved artisan PDF blueprint')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown PDF export failure.'
+      console.error('pdf export failed', { reason: message })
+      setExportError(message)
+    } finally {
+      setIsExportingPdf(false)
+    }
+  }, [pattern, processingConfig])
+
+  const handleSaveProject = useCallback(async () => {
+    try {
+      setExportError(null)
+      setStatusNote(null)
+      setIsSavingProject(true)
+      const platform = await getPlatformAdapter()
+      const path = await platform.selectSavePath({
+        defaultFileName: buildTimestampedName('magpie'),
+        title: 'Save Magpie project',
+        filters: [{ name: 'Magpie project', extensions: ['magpie'] }],
+      })
+      if (!path) return
+
+      await saveCurrentProjectToPath(path, workflowStage)
+      setStatusNote('Saved project file')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown project save failure.'
+      console.error('project save failed', { reason: message })
+      setExportError(message)
+    } finally {
+      setIsSavingProject(false)
+    }
+  }, [workflowStage])
+
   const handlePrint = useCallback(async (pageSizeOverride?: 'A4' | 'Letter') => {
     if (!pattern) return
     try {
@@ -172,14 +243,14 @@ export function ExportMenu() {
         void handlePrint(event.shiftKey ? alternatePageSize : defaultPageSize)
         return
       }
-      if (!isExportingPng && !isExportingCsv && !isPrinting) {
+      if (!isExportingPng && !isExportingCsv && !isExportingPdf && !isSavingProject && !isPrinting) {
         void handleExport()
       }
     }
 
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [canExport, handleExport, handlePrint, isExportingCsv, isExportingPng, isPrinting])
+  }, [canExport, handleExport, handlePrint, isExportingCsv, isExportingPdf, isExportingPng, isSavingProject, isPrinting])
 
   return (
     <Panel
@@ -226,9 +297,19 @@ export function ExportMenu() {
         <div className="space-y-2">
           <Button
             type="button"
-            onClick={handleExport}
+            onClick={handleSaveProject}
             disabled={exportDisabled}
             variant="primary"
+            className="w-full"
+          >
+            {isSavingProject ? 'Saving…' : 'Save Project (.magpie)'}
+          </Button>
+
+          <Button
+            type="button"
+            onClick={handleExport}
+            disabled={exportDisabled}
+            variant="secondary"
             className="w-full"
           >
             {isExportingPng ? 'Downloading…' : 'Download Preview PNG'}
@@ -252,6 +333,16 @@ export function ExportMenu() {
             className="w-full"
           >
             {isExportingSvg ? 'Downloading…' : 'Download Printable Pattern SVG'}
+          </Button>
+
+          <Button
+            type="button"
+            onClick={handleExportPdf}
+            disabled={exportDisabled}
+            variant="secondary"
+            className="w-full"
+          >
+            {isExportingPdf ? 'Generating…' : 'Export Artisan PDF (Native)'}
           </Button>
         </div>
 

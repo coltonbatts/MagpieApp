@@ -1,15 +1,15 @@
-import { useEffect, useRef, useState, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type * as PIXINamespace from 'pixi.js'
 import type { Viewport } from 'pixi-viewport'
 import { Pattern } from '@/model/Pattern'
-import { SelectionArtifact, ProcessingConfig } from '@/types'
+import { ManualStitchEdit, SelectionArtifact, ProcessingConfig } from '@/types'
 import { VIEWER } from '@/lib/constants'
 import { createViewport, fitViewportToWorld } from './viewport-config'
 import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
 import { linearRgbToOkLab, okLabDistanceSqWeighted } from '@/processing/color-spaces'
 import { getProcessedPaths, type Point } from '@/processing/vectorize'
-import { Button, SegmentedControl, Toggle } from '@/components/ui'
+import { Button, Select, SegmentedControl, Toggle } from '@/components/ui'
 
 interface PatternViewerProps {
   pattern: Pattern | null
@@ -52,12 +52,20 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
   const appRef = useRef<PIXINamespace.Application | null>(null)
   const viewportRef = useRef<Viewport | null>(null)
   const pixiRef = useRef<typeof PIXINamespace | null>(null)
-  const { processingConfig } = usePatternStore()
+  const processingConfig = usePatternStore((state) => state.processingConfig)
+  const applyManualEdits = usePatternStore((state) => state.applyManualEdits)
   const worldSizeRef = useRef({ width: 1, height: 1 })
   const hasUserTransformedViewportRef = useRef(false)
+  const pendingEditFrameRef = useRef<number | null>(null)
+  const pendingStrokeEditsRef = useRef<Map<string, ManualStitchEdit>>(new Map())
+  const isEditingStrokeRef = useRef(false)
+  const lastEditedCellRef = useRef<string | null>(null)
   const [viewerError, setViewerError] = useState<string | null>(null)
   const [isReady, setIsReady] = useState(false)
   const [debugText, setDebugText] = useState('')
+  const [editModeEnabled, setEditModeEnabled] = useState(false)
+  const [editTool, setEditTool] = useState<'paint' | 'fabric'>('paint')
+  const [selectedPaintValue, setSelectedPaintValue] = useState<string>('')
   const isDev = import.meta.env.DEV
   const fabricIndices = useMemo(
     () => (pattern ? getFabricIndices(pattern, processingConfig) : new Set<number>()),
@@ -71,6 +79,38 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
       manualMask: pattern.selection?.mask
     })
   }, [pattern, fabricIndices, processingConfig.organicPreview])
+
+  const paintOptions = useMemo(() => {
+    if (!pattern) return []
+
+    const byId = new Map<string, { id: string; label: string; edit: Omit<ManualStitchEdit, 'x' | 'y'> }>()
+    for (const stitch of pattern.stitches) {
+      if (stitch.dmcCode === 'Fabric') continue
+      const key = `${stitch.dmcCode}|${stitch.hex}|${stitch.marker}`
+      if (byId.has(key)) continue
+      byId.set(key, {
+        id: key,
+        label: stitch.dmcCode.startsWith('RAW-') ? stitch.hex : `DMC ${stitch.dmcCode}`,
+        edit: {
+          mode: 'paint',
+          hex: stitch.hex,
+          dmcCode: stitch.dmcCode,
+          marker: stitch.marker,
+        },
+      })
+    }
+
+    return Array.from(byId.values())
+  }, [pattern])
+
+  useEffect(() => {
+    if (!paintOptions.length) {
+      setSelectedPaintValue('')
+      return
+    }
+    if (paintOptions.some((option) => option.id === selectedPaintValue)) return
+    setSelectedPaintValue(paintOptions[0].id)
+  }, [paintOptions, selectedPaintValue])
 
   useEffect(() => {
     const container = containerRef.current
@@ -211,6 +251,93 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
     }
   }
 
+  const flushPendingManualEdits = useCallback(() => {
+    const pendingEntries = Array.from(pendingStrokeEditsRef.current.values())
+    pendingStrokeEditsRef.current.clear()
+    if (pendingEntries.length > 0) {
+      applyManualEdits(pendingEntries)
+    }
+  }, [applyManualEdits])
+
+  const schedulePendingEditFlush = useCallback(() => {
+    if (pendingEditFrameRef.current !== null) return
+    pendingEditFrameRef.current = window.requestAnimationFrame(() => {
+      pendingEditFrameRef.current = null
+      flushPendingManualEdits()
+    })
+  }, [flushPendingManualEdits])
+
+  const buildEditFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>): ManualStitchEdit | null => {
+    if (!pattern || !viewportRef.current) return null
+    const selectedPaint = paintOptions.find((option) => option.id === selectedPaintValue)
+    if (editTool === 'paint' && !selectedPaint) return null
+
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const screenX = event.clientX - bounds.left
+    const screenY = event.clientY - bounds.top
+    const world = viewportRef.current.toWorld(screenX, screenY)
+    const x = Math.floor(world.x / VIEWER.CELL_SIZE)
+    const y = Math.floor(world.y / VIEWER.CELL_SIZE)
+
+    if (x < 0 || y < 0 || x >= pattern.width || y >= pattern.height) {
+      return null
+    }
+
+    if (editTool === 'fabric') {
+      return { x, y, mode: 'fabric' }
+    }
+
+    return {
+      x,
+      y,
+      ...selectedPaint!.edit,
+    }
+  }, [editTool, paintOptions, pattern, selectedPaintValue])
+
+  const queueEditFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const edit = buildEditFromPointer(event)
+    if (!edit) return
+
+    const key = `${edit.x}:${edit.y}`
+    if (lastEditedCellRef.current === key) return
+    lastEditedCellRef.current = key
+    pendingStrokeEditsRef.current.set(key, edit)
+    schedulePendingEditFlush()
+  }, [buildEditFromPointer, schedulePendingEditFlush])
+
+  const handleEditPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    isEditingStrokeRef.current = true
+    queueEditFromPointer(event)
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }, [queueEditFromPointer])
+
+  const handleEditPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isEditingStrokeRef.current) return
+    queueEditFromPointer(event)
+  }, [queueEditFromPointer])
+
+  const endEditStroke = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isEditingStrokeRef.current) return
+    isEditingStrokeRef.current = false
+    lastEditedCellRef.current = null
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId)
+    }
+    if (pendingEditFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingEditFrameRef.current)
+      pendingEditFrameRef.current = null
+    }
+    flushPendingManualEdits()
+  }, [flushPendingManualEdits])
+
+  useEffect(() => () => {
+    if (pendingEditFrameRef.current !== null) {
+      window.cancelAnimationFrame(pendingEditFrameRef.current)
+      pendingEditFrameRef.current = null
+    }
+    pendingStrokeEditsRef.current.clear()
+  }, [])
+
   useEffect(() => {
     if (!isReady) return
     if (!appRef.current || !containerRef.current || !pixiRef.current || !viewportRef.current) {
@@ -293,6 +420,10 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
               <span className="select-none text-xs font-medium text-fg-muted">Outlines</span>
               <Toggle checked={showOutlines} onCheckedChange={setShowOutlines} />
             </div>
+            <div className="flex items-center justify-between gap-4 rounded-md px-1 py-0.5">
+              <span className="select-none text-xs font-medium text-fg-muted">Edit Mode</span>
+              <Toggle checked={editModeEnabled} onCheckedChange={setEditModeEnabled} />
+            </div>
           </div>
         )}
       </div>
@@ -311,6 +442,61 @@ export function PatternViewer({ pattern }: PatternViewerProps) {
           </Button>
         </div>
       </div>
+
+      {activeTab === 'pattern' && editModeEnabled && (
+        <div className="absolute bottom-4 left-4 z-20 flex w-80 flex-col gap-2 rounded-lg border border-border bg-overlay/95 p-3 shadow-sm backdrop-blur">
+          <div className="grid grid-cols-2 gap-2">
+            <Button
+              type="button"
+              size="sm"
+              variant={editTool === 'paint' ? 'primary' : 'secondary'}
+              onClick={() => setEditTool('paint')}
+            >
+              Paint
+            </Button>
+            <Button
+              type="button"
+              size="sm"
+              variant={editTool === 'fabric' ? 'primary' : 'secondary'}
+              onClick={() => setEditTool('fabric')}
+            >
+              Fabric
+            </Button>
+          </div>
+
+          {editTool === 'paint' && (
+            <label className="block text-xs text-fg-muted">
+              <span className="mb-1 block">Paint Color</span>
+              <Select
+                value={selectedPaintValue}
+                onChange={(event) => setSelectedPaintValue(event.target.value)}
+                disabled={paintOptions.length === 0}
+              >
+                {paintOptions.map((option) => (
+                  <option key={option.id} value={option.id}>
+                    {option.label}
+                  </option>
+                ))}
+              </Select>
+            </label>
+          )}
+
+          <p className="text-[11px] text-fg-subtle">
+            Click or drag over stitches to apply manual overrides.
+          </p>
+        </div>
+      )}
+
+      {activeTab === 'pattern' && editModeEnabled && pattern && (
+        <div
+          className="absolute inset-0 z-[5] cursor-crosshair touch-none"
+          onPointerDown={handleEditPointerDown}
+          onPointerMove={handleEditPointerMove}
+          onPointerUp={endEditStroke}
+          onPointerCancel={endEditStroke}
+          onPointerLeave={endEditStroke}
+        />
+      )}
       {isDev && debugText && (
         <pre className="pointer-events-none absolute top-14 left-4 z-10 whitespace-pre rounded-md border border-border bg-overlay/95 px-3 py-2 font-mono text-[11px] leading-4 text-fg-muted shadow-sm">
           {debugText}
@@ -450,6 +636,41 @@ function renderPatternPreview(
   }
 
   // 2. Vector Paths and Labels
+  if (!pattern.labels || !pattern.paletteHex) {
+    const swatches = new PIXI.Graphics()
+    pattern.stitches.forEach((stitch) => {
+      const x = stitch.x * cellSize
+      const y = stitch.y * cellSize
+      const color = stitch.dmcCode === 'Fabric' ? 0xffffff : parseInt(stitch.hex.slice(1), 16)
+      swatches.rect(x, y, cellSize, cellSize)
+      swatches.fill(color)
+    })
+    viewport.addChild(swatches)
+
+    if (showLabels) {
+      pattern.stitches.forEach((stitch) => {
+        if (stitch.dmcCode === 'Fabric' || !stitch.marker) return
+        const label = new PIXI.Text({
+          text: stitch.marker,
+          style: {
+            fontFamily: 'Arial',
+            fontSize: Math.max(7, cellSize * 0.45),
+            fill: 0x000000,
+            align: 'center',
+            fontWeight: 'bold'
+          }
+        })
+        label.anchor.set(0.5)
+        label.position.set(
+          stitch.x * cellSize + cellSize * 0.5,
+          stitch.y * cellSize + cellSize * 0.52
+        )
+        viewport.addChild(label)
+      })
+    }
+    return
+  }
+
   if (pattern.labels && pattern.paletteHex) {
     paths.forEach((path: any) => {
       if (path.isFabric) return

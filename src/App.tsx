@@ -1,7 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ControlPanel } from './components/ControlPanel'
 import { Layout } from './components/Layout'
 import { Legend } from './components/Legend'
+import { applyManualEditsToPattern } from './model/manual-edits'
 import { SelectionArtifactModel } from './model/SelectionArtifact'
 import { usePatternStore } from './store/pattern-store'
 import { useUIStore } from './store/ui-store'
@@ -17,10 +18,15 @@ import { SelectStage } from './components/workflow/SelectStage'
 import { processPattern } from './processing/process-pattern'
 
 export default function App() {
-  const { pattern, normalizedImage, referenceId, selection, processingConfig, setPattern } = usePatternStore()
+  const { pattern, normalizedImage, referenceId, selection, processingConfig, manualEdits, setPattern } = usePatternStore()
   const { workflowStage } = useUIStore()
   const [showDMCTester, setShowDMCTester] = useState(false)
   const isDev = import.meta.env.DEV
+  const manualEditsRef = useRef(manualEdits)
+
+  useEffect(() => {
+    manualEditsRef.current = manualEdits
+  }, [manualEdits])
 
   useEffect(() => {
     if (!isDev) return
@@ -60,8 +66,9 @@ export default function App() {
         })
 
         if (isMounted) {
+          const nextPatternWithEdits = applyManualEditsToPattern(nextPattern, manualEditsRef.current)
           if (debugColor) logPatternPaletteDebug(nextPattern)
-          setPattern(nextPattern)
+          setPattern(nextPatternWithEdits)
         }
       } catch (err) {
         console.error('Failed to process pattern:', err)

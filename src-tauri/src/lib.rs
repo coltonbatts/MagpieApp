@@ -1,6 +1,8 @@
 mod embroidery;
+mod pdf_export;
 
 use embroidery::{process_pattern, process_pattern_from_path, PatternResult, ProcessingConfig};
+use pdf_export::PdfExportPayload;
 use rfd::FileDialog;
 use serde::Deserialize;
 use std::fs;
@@ -34,6 +36,23 @@ fn desktop_select_save_path(
 }
 
 #[tauri::command]
+fn desktop_select_open_path(title: Option<String>, filters: Vec<DialogFilter>) -> Option<String> {
+    let mut dialog = FileDialog::new();
+    if let Some(title) = title {
+        dialog = dialog.set_title(&title);
+    }
+
+    for filter in filters {
+        let extensions: Vec<&str> = filter.extensions.iter().map(String::as_str).collect();
+        dialog = dialog.add_filter(&filter.name, &extensions);
+    }
+
+    dialog
+        .pick_file()
+        .map(|path| path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
 fn desktop_select_folder(title: Option<String>) -> Option<String> {
     let mut dialog = FileDialog::new();
     if let Some(title) = title {
@@ -43,6 +62,11 @@ fn desktop_select_folder(title: Option<String>) -> Option<String> {
     dialog
         .pick_folder()
         .map(|path| path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn desktop_read_file(path: String) -> Result<Vec<u8>, String> {
+    fs::read(path).map_err(|err| err.to_string())
 }
 
 #[tauri::command]
@@ -65,6 +89,11 @@ fn desktop_open_in_folder(path: String) -> Result<(), String> {
     };
 
     opener::open(target).map_err(|err| err.to_string())
+}
+
+#[tauri::command]
+fn export_pattern_pdf(payload: PdfExportPayload) -> Result<Vec<u8>, String> {
+    pdf_export::export_pattern_pdf(&payload)
 }
 
 /// Process an image into an embroidery pattern using native Rust performance.
@@ -140,9 +169,12 @@ pub fn run() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             desktop_select_save_path,
+            desktop_select_open_path,
             desktop_select_folder,
+            desktop_read_file,
             desktop_write_file,
             desktop_open_in_folder,
+            export_pattern_pdf,
             process_embroidery_pattern,
             process_embroidery_pattern_from_file,
         ])

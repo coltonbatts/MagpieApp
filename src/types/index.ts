@@ -131,3 +131,16 @@ export interface SelectionArtifact {
   height: number
   isDefault: boolean // True if it's the initial "select all" mask
 }
+
+export type ManualStitchEditMode = 'paint' | 'fabric'
+
+export interface ManualStitchEdit {
+  x: number
+  y: number
+  mode: ManualStitchEditMode
+  hex?: string
+  dmcCode?: string
+  marker?: string
+}
+
+export type ManualStitchEdits = Record<string, ManualStitchEdit>
