@@ -527,19 +527,89 @@ fn chaikin_closed(points: &[[f32; 2]]) -> Vec<[f32; 2]> {
 }
 
 fn points_to_svg_path(points: &[[f32; 2]]) -> String {
-    if points.len() < 2 {
+    if points.len() < 4 {
         return String::new();
     }
-    let mut out = String::new();
-    for (i, p) in points.iter().enumerate() {
-        if i == 0 {
-            out.push_str(&format!("M {:.2} {:.2}", p[0], p[1]));
-        } else {
-            out.push_str(&format!(" L {:.2} {:.2}", p[0], p[1]));
-        }
+
+    let ring = normalize_closed_loop(points);
+    if ring.len() < 3 {
+        return String::new();
     }
+
+    let mut out = String::new();
+    let first = ring[0];
+    out.push_str(&format!("M {:.2} {:.2}", first[0], first[1]));
+
+    for i in 0..ring.len() {
+        let p0 = ring[(i + ring.len() - 1) % ring.len()];
+        let p1 = ring[i];
+        let p2 = ring[(i + 1) % ring.len()];
+        let p3 = ring[(i + 2) % ring.len()];
+
+        let mut c1 = [
+            p1[0] + (p2[0] - p0[0]) / 6.0,
+            p1[1] + (p2[1] - p0[1]) / 6.0,
+        ];
+        let mut c2 = [
+            p2[0] - (p3[0] - p1[0]) / 6.0,
+            p2[1] - (p3[1] - p1[1]) / 6.0,
+        ];
+
+        // Preserve corners by shrinking handles where local turn is sharp.
+        let scale_out = corner_smooth_scale(p0, p1, p2);
+        let scale_in = corner_smooth_scale(p1, p2, p3);
+        c1 = lerp_point(p1, c1, scale_out);
+        c2 = lerp_point(p2, c2, scale_in);
+
+        // Clamp handles to avoid overshoot artifacts on tiny stair-step segments.
+        let len_prev = distance(p0, p1);
+        let len_next = distance(p1, p2);
+        let max_h1 = 0.5 * len_prev.min(len_next);
+        c1 = clamp_handle(p1, c1, max_h1);
+
+        let len_prev2 = distance(p1, p2);
+        let len_next2 = distance(p2, p3);
+        let max_h2 = 0.5 * len_prev2.min(len_next2);
+        c2 = clamp_handle(p2, c2, max_h2);
+
+        out.push_str(&format!(
+            " C {:.2} {:.2} {:.2} {:.2} {:.2} {:.2}",
+            c1[0], c1[1], c2[0], c2[1], p2[0], p2[1]
+        ));
+    }
+
     out.push_str(" Z");
     out
+}
+
+fn lerp_point(a: [f32; 2], b: [f32; 2], t: f32) -> [f32; 2] {
+    let t = t.clamp(0.0, 1.0);
+    [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t]
+}
+
+fn distance(a: [f32; 2], b: [f32; 2]) -> f32 {
+    let dx = b[0] - a[0];
+    let dy = b[1] - a[1];
+    (dx * dx + dy * dy).sqrt()
+}
+
+fn clamp_handle(anchor: [f32; 2], handle: [f32; 2], max_len: f32) -> [f32; 2] {
+    if max_len <= f32::EPSILON {
+        return anchor;
+    }
+    let dx = handle[0] - anchor[0];
+    let dy = handle[1] - anchor[1];
+    let len = (dx * dx + dy * dy).sqrt();
+    if len <= max_len || len <= f32::EPSILON {
+        return handle;
+    }
+    let scale = max_len / len;
+    [anchor[0] + dx * scale, anchor[1] + dy * scale]
+}
+
+fn corner_smooth_scale(prev: [f32; 2], curr: [f32; 2], next: [f32; 2]) -> f32 {
+    let angle = interior_angle_degrees(prev, curr, next);
+    ((angle - 70.0) / 90.0).clamp(0.0, 1.0)
 }
 
 fn bounds_for_loop(points: &[[f32; 2]]) -> RegionBounds {

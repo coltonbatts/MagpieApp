@@ -102,15 +102,11 @@ export function PatternViewer({
 
   // Sync stage to tab
   useEffect(() => {
-    if (workflowStage === 'Export') {
-      setActiveTab('pattern')
-      setShowGrid(false)
-      setViewMode('Grid')
-    } else if (workflowStage === 'Build') {
+    if (workflowStage === 'Build') {
       setActiveTab('pattern')
       setViewMode('Regions')
       setShowGrid(false)
-    } else {
+    } else if (workflowStage !== 'Export') {
       setActiveTab('finished')
       setShowGrid(true)
     }
@@ -1136,11 +1132,11 @@ function renderFinishedPreview(
   options: RenderOptions,
   fabricIndices: Set<number>
 ) {
-  const { config, paths } = options
+  const { paths } = options
   const cellSize = VIEWER.CELL_SIZE
 
-  if (config.organicPreview && pattern.labels && pattern.paletteHex) {
-    // Vector Organic Look
+  if (pattern.labels && pattern.paletteHex && paths.length > 0) {
+    // Prefer smooth filled regions for final-look preview.
     paths.forEach(path => {
       if (path.isFabric) return
       const color = parseInt(pattern.paletteHex![path.label].slice(1), 16)
@@ -1151,10 +1147,8 @@ function renderFinishedPreview(
       viewport.addChild(poly)
     })
   } else {
-    // Stitch-like Pixel Look
+    // Fallback when labels/paths are unavailable.
     const stitchLayer = new PIXI.Graphics()
-    const gap = 1.5
-    const radius = 2
     const mask = pattern.selection?.mask
 
     pattern.stitches.forEach((stitch, i) => {
@@ -1167,14 +1161,7 @@ function renderFinishedPreview(
       if (fabricIndices.has(colorIdx)) return
 
       const color = parseInt(stitch.hex.slice(1), 16)
-      // Draw a rounded rectangle for a "stitch" look
-      stitchLayer.roundRect(
-        stitch.x * cellSize + gap / 2,
-        stitch.y * cellSize + gap / 2,
-        cellSize - gap,
-        cellSize - gap,
-        radius
-      )
+      stitchLayer.rect(stitch.x * cellSize, stitch.y * cellSize, cellSize, cellSize)
       stitchLayer.fill(color)
     })
     viewport.addChild(stitchLayer)

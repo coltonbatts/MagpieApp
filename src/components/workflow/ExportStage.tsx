@@ -9,7 +9,7 @@ export function ExportStage() {
     const { pattern, compositionLocked } = usePatternStore()
     const { setWorkflowStage } = useUIStore()
 
-    const [activeTab, setActiveTab] = useState<'finished' | 'pattern'>('pattern')
+    const [activeTab, setActiveTab] = useState<'finished' | 'pattern'>('finished')
 
     return (
         <div className="flex h-full w-full overflow-hidden bg-bg">

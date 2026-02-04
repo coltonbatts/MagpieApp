@@ -2,7 +2,11 @@ import { useEffect, useRef } from 'react'
 
 const MAX_EYE_SHIFT = 4
 
-export function MascotEyes() {
+interface MascotEyesProps {
+  inline?: boolean
+}
+
+export function MascotEyes({ inline = false }: MascotEyesProps) {
   const eyeRefs = useRef<Array<HTMLDivElement | null>>([])
 
   useEffect(() => {
@@ -55,7 +59,7 @@ export function MascotEyes() {
   }, [])
 
   return (
-    <div className="magpie-wordmark" aria-hidden="true">
+    <div className={`magpie-wordmark ${inline ? 'magpie-wordmark--inline' : ''}`} aria-hidden="true">
       <div className="magpie-wordmark__eyes">
         {[0, 1].map((eyeIndex) => (
           <div

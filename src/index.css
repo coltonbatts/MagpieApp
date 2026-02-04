@@ -190,6 +190,13 @@
   user-select: none;
 }
 
+.magpie-wordmark--inline {
+  position: static;
+  left: auto;
+  top: auto;
+  z-index: auto;
+}
+
 .magpie-wordmark__eyes {
   display: flex;
   align-items: center;
@@ -257,4 +264,10 @@
   font-weight: 400;
   line-height: 1;
   animation: splash-wordmark-in 420ms var(--ease-standard) both;
+}
+
+.hub-bg {
+  background:
+    radial-gradient(1200px 500px at 50% -10%, rgb(255 255 255 / 0.9), rgb(245 241 232 / 0.95) 52%, rgb(241 237 227) 100%),
+    linear-gradient(transparent, transparent);
 }

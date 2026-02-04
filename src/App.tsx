@@ -22,6 +22,7 @@ import { StageTransitionLayer } from './components/workflow/StageTransitionLayer
 import { MascotEyes } from './components/MascotEyes'
 import { processPattern } from './processing/process-pattern'
 import { incrementDevCounter } from './lib/dev-instrumentation'
+import type { HoopShape } from './types'
 
 export default function App() {
   const { normalizedImage, referenceId, selection, processingConfig, setPattern, isProcessing, setIsProcessing } = usePatternStore()
@@ -111,9 +112,13 @@ export default function App() {
   async function handleCreateProject({
     projectName,
     referenceImagePath: nextReferencePath,
+    hoopShape,
+    hoopSizeMm,
   }: {
     projectName: string
     referenceImagePath: string
+    hoopShape: HoopShape
+    hoopSizeMm: number
   }) {
     const platform = await getPlatformAdapter()
     const imageBytes = await platform.readFile(nextReferencePath)
@@ -130,6 +135,7 @@ export default function App() {
     const patternStore = usePatternStore.getState()
     patternStore.setOriginalImage(sourceBitmap)
     patternStore.setSourceImages(buildImage, selectionImage)
+    patternStore.setFabricSetup({ hoop: createInitialHoopConfig(hoopShape, hoopSizeMm) })
 
     const now = new Date().toISOString()
     setCurrentProject({
@@ -217,7 +223,6 @@ export default function App() {
   if (isHubVisible) {
     return (
       <>
-        <MascotEyes />
         <HomeHub onCreateProject={handleCreateProject} onOpenProject={handleOpenProject} />
       </>
     )
@@ -321,4 +326,19 @@ function guessMimeType(path: string): string {
   if (lower.endsWith('.bmp')) return 'image/bmp'
   if (lower.endsWith('.gif')) return 'image/gif'
   return 'image/png'
+}
+
+function createInitialHoopConfig(shape: HoopShape, sizeMm: number) {
+  const safeSize = Math.max(100, Math.round(sizeMm))
+  const heightMm = shape === 'oval' ? Math.round(safeSize * 0.75) : safeSize
+  const labelPrefix = shape === 'round' ? 'Round' : shape === 'square' ? 'Square' : 'Oval'
+  const inches = (safeSize / 25.4).toFixed(1)
+  return {
+    presetId: `${shape}-${safeSize}`,
+    label: `${labelPrefix} ${inches}"`,
+    shape,
+    widthMm: safeSize,
+    heightMm,
+    marginMm: 10,
+  }
 }

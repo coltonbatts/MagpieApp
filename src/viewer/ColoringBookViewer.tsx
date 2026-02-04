@@ -294,8 +294,11 @@ export function ColoringBookViewer({
 }
 
 function parseSimpleSvgPath(path: string): ParsedPath {
-  const tokens = path.match(/[MLZ]|-?\d+(?:\.\d+)?/g) ?? []
+  const tokens = path.match(/[MLCZ]|-?\d+(?:\.\d+)?/g) ?? []
   const points: Array<{ x: number; y: number }> = []
+
+  let startPoint: { x: number; y: number } | null = null
+  let currentPoint: { x: number; y: number } | null = null
 
   let i = 0
   while (i < tokens.length) {
@@ -304,13 +307,57 @@ function parseSimpleSvgPath(path: string): ParsedPath {
       const x = Number.parseFloat(tokens[i + 1] ?? '')
       const y = Number.parseFloat(tokens[i + 2] ?? '')
       if (Number.isFinite(x) && Number.isFinite(y)) {
-        points.push({ x, y })
+        const point = { x, y }
+        points.push(point)
+        currentPoint = point
+        if (token === 'M') {
+          startPoint = point
+        }
       }
       i += 3
       continue
     }
 
+    if (token === 'C') {
+      const c1x = Number.parseFloat(tokens[i + 1] ?? '')
+      const c1y = Number.parseFloat(tokens[i + 2] ?? '')
+      const c2x = Number.parseFloat(tokens[i + 3] ?? '')
+      const c2y = Number.parseFloat(tokens[i + 4] ?? '')
+      const x = Number.parseFloat(tokens[i + 5] ?? '')
+      const y = Number.parseFloat(tokens[i + 6] ?? '')
+
+      if (
+        currentPoint &&
+        Number.isFinite(c1x) &&
+        Number.isFinite(c1y) &&
+        Number.isFinite(c2x) &&
+        Number.isFinite(c2y) &&
+        Number.isFinite(x) &&
+        Number.isFinite(y)
+      ) {
+        const p0 = currentPoint
+        const p1 = { x: c1x, y: c1y }
+        const p2 = { x: c2x, y: c2y }
+        const p3 = { x, y }
+        const samples = 8
+        for (let step = 1; step <= samples; step++) {
+          const t = step / samples
+          points.push(sampleCubicBezier(p0, p1, p2, p3, t))
+        }
+        currentPoint = p3
+      }
+
+      i += 7
+      continue
+    }
+
     if (token === 'Z') {
+      if (startPoint && points.length > 0) {
+        const last = points[points.length - 1]
+        if (last.x !== startPoint.x || last.y !== startPoint.y) {
+          points.push(startPoint)
+        }
+      }
       i += 1
       continue
     }
@@ -319,6 +366,25 @@ function parseSimpleSvgPath(path: string): ParsedPath {
   }
 
   return { points }
+}
+
+function sampleCubicBezier(
+  p0: { x: number; y: number },
+  p1: { x: number; y: number },
+  p2: { x: number; y: number },
+  p3: { x: number; y: number },
+  t: number
+): { x: number; y: number } {
+  const u = 1 - t
+  const tt = t * t
+  const uu = u * u
+  const uuu = uu * u
+  const ttt = tt * t
+
+  return {
+    x: uuu * p0.x + 3 * uu * t * p1.x + 3 * u * tt * p2.x + ttt * p3.x,
+    y: uuu * p0.y + 3 * uu * t * p1.y + 3 * u * tt * p2.y + ttt * p3.y,
+  }
 }
 
 function parseHexColor(hex: string): number {

@@ -13,6 +13,7 @@ const STAGES: { id: WorkflowStage; label: string }[] = [
 export function WorkflowStepper() {
   const { workflowStage, workflowTransition, setWorkflowStage } = useUIStore()
   const { originalImage, normalizedImage, selectionWorkingImage, setCompositionLocked } = usePatternStore()
+  const activeIndex = STAGES.findIndex((stage) => stage.id === workflowStage)
 
   return (
     <nav className="border-b border-border bg-surface/95 backdrop-blur">
@@ -54,7 +55,25 @@ export function WorkflowStepper() {
                     )}
                   </button>
                   {idx < STAGES.length - 1 && (
-                    <div className="mx-1.5 h-px w-3 bg-border" />
+                    <div
+                      className={`mx-1.5 h-px w-3 transition-colors duration-180 ${
+                        idx < activeIndex ? 'bg-border-strong' : 'bg-border'
+                      }`}
+                    />
+                  )}
+                  {idx === STAGES.length - 1 && (
+                    <div className="ml-1.5 flex items-center">
+                      <div
+                        className={`h-px w-2 transition-colors duration-180 ${
+                          activeIndex >= idx ? 'bg-border-strong' : 'bg-border'
+                        }`}
+                      />
+                      <div
+                        className={`h-2 w-2 rounded-tr-full border-r border-t transition-colors duration-180 ${
+                          activeIndex >= idx ? 'border-border-strong' : 'border-border'
+                        }`}
+                      />
+                    </div>
                   )}
                 </div>
               )
