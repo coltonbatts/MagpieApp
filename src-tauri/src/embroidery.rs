@@ -368,15 +368,6 @@ fn rgb_to_hex(rgb: [u8; 3]) -> String {
     format!("#{:02X}{:02X}{:02X}", rgb[0], rgb[1], rgb[2])
 }
 
-/// Convert sRGB to linear RGB (for color space conversions)
-fn srgb_to_linear(v: f32) -> f32 {
-    if v <= 0.04045 {
-        v / 12.92
-    } else {
-        ((v + 0.055) / 1.055).powf(2.4)
-    }
-}
-
 /// Convert RGB [0-255] to LAB color space
 fn rgb_to_lab(rgb: [u8; 3]) -> Lab<D65, f32> {
     let srgb = Srgb::new(
@@ -641,7 +632,6 @@ fn remove_small_regions(
     }
 }
 
-
 /// Main pattern processing function
 pub fn process_pattern(
     image_bytes: &[u8],
@@ -674,23 +664,34 @@ pub fn process_pattern(
         })
         .collect();
 
-    // Filter training pixels if mask is provided
-    let training_pixels: Vec<Lab<D65, f32>> = if let Some(mask) = mask {
+    let detail_bias = (1.0 - config.simplify_amount).clamp(0.0, 1.0);
+    let color_bias = ((config.color_count as f32 - 2.0) / 62.0).clamp(0.0, 1.0);
+    let quality_bias = ((detail_bias + color_bias) * 0.5).clamp(0.0, 1.0);
+    let max_train = (8000.0 + 42000.0 * quality_bias).round() as usize;
+    let stride = (n / max_train.max(1)).max(1);
+
+    // Filter training pixels if mask is provided.
+    let mut training_pixels: Vec<Lab<D65, f32>> = if let Some(mask) = mask {
         pixels
             .iter()
             .zip(mask.iter())
             .filter_map(|(p, &m)| if m > 0 { Some(*p) } else { None })
+            .step_by(stride)
             .collect()
     } else {
-        // Subsample for faster k-means training
-        let max_train = 10000;
-        let stride = (n / max_train).max(1);
-        pixels.iter().step_by(stride).cloned().collect()
+        pixels.iter().step_by(stride).copied().collect()
     };
+
+    if training_pixels.is_empty() {
+        training_pixels = pixels.iter().step_by(stride).copied().collect();
+    }
 
     // Run k-means quantization
     let k = config.color_count as usize;
-    let (palette_lab, _) = kmeans_quantize(&training_pixels, k, 12);
+    let max_iterations =
+        (10.0 + quality_bias * 10.0 + config.smoothing_amount.clamp(0.0, 1.0) * 4.0).round()
+            as usize;
+    let (palette_lab, _) = kmeans_quantize(&training_pixels, k, max_iterations.max(8));
 
     // Assign all pixels to nearest cluster (parallel)
     let mut labels: Vec<u16> = pixels

@@ -238,28 +238,62 @@ export function FabricStage() {
                 <SegmentedControl
                   className="w-full"
                   value={fabricSetup.hoop.shape}
-                  onValueChange={(v) => setFabricSetup({ hoop: { ...fabricSetup.hoop, shape: v as any } })}
+                  onValueChange={(v) => {
+                    const nextShape = v as FabricSetup['hoop']['shape']
+                    const nextHoop =
+                      nextShape === 'oval'
+                        ? { ...fabricSetup.hoop, shape: nextShape, heightMm: Math.max(100, Math.round(fabricSetup.hoop.heightMm || fabricSetup.hoop.widthMm * 0.75)) }
+                        : { ...fabricSetup.hoop, shape: nextShape, heightMm: fabricSetup.hoop.widthMm }
+                    setFabricSetup({ hoop: nextHoop })
+                    updateLocalFabricSetup({ hoop: nextHoop })
+                  }}
                   options={[
                     { label: 'Round', value: 'round' },
                     { label: 'Square', value: 'square' },
+                    { label: 'Oval', value: 'oval' },
                   ]}
                 />
               </div>
 
               <Slider
-                label="Diameter / Width (mm)"
+                label={localFabricSetup.hoop.shape === 'round' ? 'Diameter (mm)' : 'Width (mm)'}
                 min={100}
                 max={400}
                 step={1}
                 value={localFabricSetup.hoop.widthMm}
-                onChange={(v) => updateLocalFabricSetup({ 
-                  hoop: { ...localFabricSetup.hoop, widthMm: v, heightMm: v } 
+                onChange={(v) => updateLocalFabricSetup({
+                  hoop: {
+                    ...localFabricSetup.hoop,
+                    widthMm: v,
+                    heightMm: localFabricSetup.hoop.shape === 'oval' ? localFabricSetup.hoop.heightMm : v
+                  }
                 })}
-                onChangeCommit={(v) => commitFabricSetup({ 
-                  hoop: { ...localFabricSetup.hoop, widthMm: v, heightMm: v } 
+                onChangeCommit={(v) => commitFabricSetup({
+                  hoop: {
+                    ...localFabricSetup.hoop,
+                    widthMm: v,
+                    heightMm: localFabricSetup.hoop.shape === 'oval' ? localFabricSetup.hoop.heightMm : v
+                  }
                 })}
                 formatValue={(v) => `${v}mm`}
               />
+
+              {localFabricSetup.hoop.shape === 'oval' && (
+                <Slider
+                  label="Height (mm)"
+                  min={100}
+                  max={400}
+                  step={1}
+                  value={localFabricSetup.hoop.heightMm}
+                  onChange={(v) => updateLocalFabricSetup({
+                    hoop: { ...localFabricSetup.hoop, heightMm: v }
+                  })}
+                  onChangeCommit={(v) => commitFabricSetup({
+                    hoop: { ...localFabricSetup.hoop, heightMm: v }
+                  })}
+                  formatValue={(v) => `${v}mm`}
+                />
+              )}
 
               <Slider
                 label="Safety Margin (mm)"

@@ -99,6 +99,7 @@ export interface ExportOptions {
 export type WorkflowStage = 'Fabric' | 'Reference' | 'Select' | 'Build' | 'Export'
 
 export type HoopShape = 'round' | 'oval' | 'square'
+export type HoopProcessingShape = 'circle' | 'oval' | 'square'
 
 export interface HoopConfig {
   presetId: string
@@ -107,6 +108,15 @@ export interface HoopConfig {
   widthMm: number
   heightMm: number
   marginMm: number
+}
+
+export interface HoopProcessingConfig {
+  shape: HoopProcessingShape
+  centerX: number
+  centerY: number
+  width: number
+  height: number
+  rotation: number
 }
 
 export interface FabricSetup {
@@ -212,4 +222,44 @@ export interface BuildArtifact {
   adjacency?: number[][]
   allBoundarySegments?: number[]
   outlineSegmentsByRegionId?: Array<number[] | null>
+}
+
+export interface ColoringBookRegionColor {
+  rgb: [number, number, number]
+  hex: string
+  dmcCode: string | null
+}
+
+export interface ColoringBookRegionBounds {
+  x: number
+  y: number
+  w: number
+  h: number
+}
+
+export interface ColoringBookRegion {
+  regionId: string
+  color: ColoringBookRegionColor
+  areaPx: number
+  pathSvg: string
+  holesSvg: string[]
+  bbox: ColoringBookRegionBounds
+  centroidX: number
+  centroidY: number
+}
+
+export interface ColoringBookPerfStats {
+  decodeMs: number
+  quantizeMs: number
+  contourMs: number
+  totalMs: number
+}
+
+export interface ColoringBookData {
+  width: number
+  height: number
+  regions: ColoringBookRegion[]
+  palette: string[]
+  perf: ColoringBookPerfStats
+  cacheKey: string
 }

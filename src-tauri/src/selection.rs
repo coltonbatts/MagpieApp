@@ -16,7 +16,9 @@ pub struct SelectionWorkspace {
 static WORKSPACE_CACHE: OnceLock<Arc<Mutex<Option<SelectionWorkspace>>>> = OnceLock::new();
 
 fn get_cache() -> Arc<Mutex<Option<SelectionWorkspace>>> {
-    WORKSPACE_CACHE.get_or_init(|| Arc::new(Mutex::new(None))).clone()
+    WORKSPACE_CACHE
+        .get_or_init(|| Arc::new(Mutex::new(None)))
+        .clone()
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -54,12 +56,8 @@ pub fn init_workspace(
             let r = (p[0] as f32 * a + 255.0 * (1.0 - a)) as u8;
             let g = (p[1] as f32 * a + 255.0 * (1.0 - a)) as u8;
             let b = (p[2] as f32 * a + 255.0 * (1.0 - a)) as u8;
-            
-            let srgb = Srgb::new(
-                r as f32 / 255.0,
-                g as f32 / 255.0,
-                b as f32 / 255.0,
-            );
+
+            let srgb = Srgb::new(r as f32 / 255.0, g as f32 / 255.0, b as f32 / 255.0);
             Lab::from_color(srgb)
         })
         .collect();
@@ -98,13 +96,10 @@ pub fn init_workspace(
     Ok((width, height))
 }
 
-pub fn magic_wand_click(
-    workspace_id: &str,
-    params: &MagicWandParams,
-) -> Result<Vec<u8>, String> {
+pub fn magic_wand_click(workspace_id: &str, params: &MagicWandParams) -> Result<Vec<u8>, String> {
     let cache = get_cache();
     let lock = cache.lock().map_err(|_| "Mutex poisoned")?;
-    
+
     let ws = match &*lock {
         Some(ws) if ws.id == workspace_id => ws,
         _ => return Err("Workspace not found or ID mismatch".to_string()),
@@ -165,11 +160,16 @@ pub fn magic_wand_click(
     }
 
     // Default post-process
-    let final_mask = post_process_mask(&mask, width, height, &RefinementParams {
-        min_island_area: 16,
-        hole_fill_area: 16,
-        smoothing_passes: 1,
-    });
+    let final_mask = post_process_mask(
+        &mask,
+        width,
+        height,
+        &RefinementParams {
+            min_island_area: 16,
+            hole_fill_area: 16,
+            smoothing_passes: 1,
+        },
+    );
 
     Ok(final_mask)
 }
@@ -210,7 +210,9 @@ fn post_process_mask(mask: &[u8], width: u32, height: u32, params: &RefinementPa
                     }
                 }
                 if (region.len() as u32) < params.min_island_area {
-                    for &idx in &region { result[idx] = 0; }
+                    for &idx in &region {
+                        result[idx] = 0;
+                    }
                 }
             }
         }
@@ -248,7 +250,9 @@ fn post_process_mask(mask: &[u8], width: u32, height: u32, params: &RefinementPa
                     }
                 }
                 if !touches_edge && (region.len() as u32) < params.hole_fill_area {
-                    for &idx in &region { result[idx] = 1; }
+                    for &idx in &region {
+                        result[idx] = 1;
+                    }
                 }
             }
         }
@@ -262,7 +266,10 @@ fn post_process_mask(mask: &[u8], width: u32, height: u32, params: &RefinementPa
                 let mut count = 0;
                 for dy in -1..=1 {
                     for dx in -1..=1 {
-                        if result[((y as i32 + dy) as u32 * width + (x as i32 + dx) as u32) as usize] == 1 {
+                        if result
+                            [((y as i32 + dy) as u32 * width + (x as i32 + dx) as u32) as usize]
+                            == 1
+                        {
                             count += 1;
                         }
                     }
@@ -316,19 +323,25 @@ mod tests {
         for y in 0..5 {
             for x in 0..5 {
                 let idx = (y * 10 + x) as usize * 4;
-                rgba[idx] = 255; rgba[idx+1] = 0; rgba[idx+2] = 0;
+                rgba[idx] = 255;
+                rgba[idx + 1] = 0;
+                rgba[idx + 2] = 0;
             }
         }
 
         init_workspace(&rgba, 10, 10, "coord-test".to_string()).unwrap();
 
         // Click inside red square
-        let mask = magic_wand_click("coord-test", &MagicWandParams {
-            seed_x: 2,
-            seed_y: 2,
-            tolerance: 5.0,
-            edge_stop: 100.0,
-        }).unwrap();
+        let mask = magic_wand_click(
+            "coord-test",
+            &MagicWandParams {
+                seed_x: 2,
+                seed_y: 2,
+                tolerance: 5.0,
+                edge_stop: 100.0,
+            },
+        )
+        .unwrap();
 
         // Check top-left pixel
         assert_eq!(mask[0], 1);

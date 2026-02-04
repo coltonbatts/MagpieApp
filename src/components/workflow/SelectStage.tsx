@@ -8,6 +8,7 @@ import { MaskLayer } from './MaskLayer'
 import { Button, Slider } from '@/components/ui'
 import type { CameraState } from '@/types'
 import { fitCameraToWorld, zoomAtCursor } from '@/lib/camera'
+import { createHoopMask, createHoopProcessingConfig } from '@/lib/hoop-mask'
 
 export function SelectStage() {
     const cameraDebugEnabled = import.meta.env.DEV && window.localStorage.getItem('magpie:cameraDebug') === '1'
@@ -51,14 +52,21 @@ export function SelectStage() {
 
     // Initialize selection if it doesn't exist
     useEffect(() => {
-        if (selectionWorkingImage && referenceId && !selection) {
-            setSelection(SelectionArtifactModel.createDefault(
-                selectionWorkingImage.width,
-                selectionWorkingImage.height,
-                referenceId
-            ))
-        }
-    }, [selectionWorkingImage, referenceId, selection, setSelection])
+        if (!selectionWorkingImage || !referenceId || selection || !referencePlacement) return
+        const hoopConfig = createHoopProcessingConfig(
+            selectionWorkingImage.width,
+            selectionWorkingImage.height,
+            referencePlacement,
+            fabricSetup.hoop
+        )
+        const hoopMask = createHoopMask(selectionWorkingImage.width, selectionWorkingImage.height, hoopConfig)
+        const initialSelection = SelectionArtifactModel.createDefault(
+            selectionWorkingImage.width,
+            selectionWorkingImage.height,
+            referenceId
+        )
+        setSelection(SelectionArtifactModel.updateMask(initialSelection, hoopMask))
+    }, [fabricSetup.hoop, referenceId, referencePlacement, selection, selectionWorkingImage, setSelection])
 
     // Initialize Rust selection workspace
     useEffect(() => {
@@ -236,8 +244,19 @@ export function SelectStage() {
     }, [commitCamera])
 
     const handleCommit = (finalMask: Uint8Array) => {
-        if (!selection) return
-        setSelection(SelectionArtifactModel.updateMask(selection, finalMask))
+        if (!selection || !referencePlacement || !selectionWorkingImage) return
+        const hoopConfig = createHoopProcessingConfig(
+            selectionWorkingImage.width,
+            selectionWorkingImage.height,
+            referencePlacement,
+            fabricSetup.hoop
+        )
+        const hoopMask = createHoopMask(selectionWorkingImage.width, selectionWorkingImage.height, hoopConfig)
+        const constrainedMask = new Uint8Array(finalMask.length)
+        for (let i = 0; i < finalMask.length; i += 1) {
+            constrainedMask[i] = finalMask[i] === 1 && hoopMask[i] === 1 ? 1 : 0
+        }
+        setSelection(SelectionArtifactModel.updateMask(selection, constrainedMask))
     }
 
 

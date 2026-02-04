@@ -58,7 +58,9 @@ struct RegionCache {
 
 static REGION_CACHE: OnceLock<Mutex<RegionCache>> = OnceLock::new();
 
-pub fn extract_regions_cached(payload: &RegionExtractionPayload) -> Result<Vec<PatternRegion>, String> {
+pub fn extract_regions_cached(
+    payload: &RegionExtractionPayload,
+) -> Result<Vec<PatternRegion>, String> {
     let payload_hash = hash_region_payload(payload);
     let cache = REGION_CACHE.get_or_init(|| Mutex::new(RegionCache::default()));
 

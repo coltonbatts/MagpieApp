@@ -1,5 +1,5 @@
-use serde::Deserialize;
 use crate::regions::{self, GridPoint, PatternRegion};
+use serde::Deserialize;
 
 const A4_WIDTH_PT: f32 = 595.0;
 const A4_HEIGHT_PT: f32 = 842.0;

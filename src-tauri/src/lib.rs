@@ -1,4 +1,5 @@
 mod embroidery;
+mod image_processor;
 mod pdf_export;
 mod project_hub;
 mod regions;
@@ -235,6 +236,27 @@ fn compute_pattern_regions(
     regions::extract_regions_cached(&payload)
 }
 
+#[tauri::command]
+async fn process_image(
+    app: tauri::AppHandle,
+    image_data: Vec<u8>,
+    color_count: u8,
+    detail_level: f32,
+    hoop_config: image_processor::HoopConfig,
+) -> Result<image_processor::RegionData, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        image_processor::process_image_pipeline(
+            &app,
+            image_data,
+            color_count,
+            detail_level,
+            hoop_config,
+        )
+    })
+    .await
+    .map_err(|e| format!("Image processing task failed: {}", e))?
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -254,6 +276,7 @@ pub fn run() {
             magic_wand_click_command,
             refine_selection,
             compute_pattern_regions,
+            process_image,
             get_all_projects,
             save_project,
             load_project,

@@ -28,6 +28,11 @@ export const StudioPreview = memo(function StudioPreview({ fabricSetup, children
     const hoopH = heightMm * scale
     const marginW = Math.max(0, (widthMm - marginMm * 2) * scale)
     const marginH = Math.max(0, (heightMm - marginMm * 2) * scale)
+    const hoopClipPath = shape === 'round'
+        ? 'circle(50% at 50% 50%)'
+        : shape === 'oval'
+            ? 'ellipse(50% 50% at 50% 50%)'
+            : 'inset(0 round 0)'
 
     return (
         <div className="relative w-full h-full flex items-center justify-center">
@@ -65,12 +70,13 @@ export const StudioPreview = memo(function StudioPreview({ fabricSetup, children
                 style={{
                     width: hoopW,
                     height: hoopH,
-                    borderRadius: shape === 'round' ? '50%' : '16px',
+                    borderRadius: shape === 'round' ? '50%' : shape === 'oval' ? '9999px' : '0',
+                    clipPath: hoopClipPath,
                     boxShadow: '0 0 0 1000px rgba(255, 255, 255, 0.35), 0 20px 60px rgba(0,0,0,0.15)',
                 }}
             >
                 {/* Image / Content Container (Clipped to Hoop) */}
-                <div className="absolute inset-0 overflow-hidden" style={{ borderRadius: shape === 'round' ? '50%' : '12px' }}>
+                <div className="absolute inset-0 overflow-hidden" style={{ borderRadius: shape === 'round' ? '50%' : shape === 'oval' ? '9999px' : '0', clipPath: hoopClipPath }}>
                     {children}
                 </div>
 
@@ -78,7 +84,7 @@ export const StudioPreview = memo(function StudioPreview({ fabricSetup, children
                 <div
                     className="absolute inset-[-14px] border-[14px] border-[#e2e8f0] shadow-2xl transition-all duration-75 pointer-events-none"
                     style={{
-                        borderRadius: shape === 'round' ? '50%' : '24px',
+                        borderRadius: shape === 'round' ? '50%' : shape === 'oval' ? '9999px' : '0',
                         boxShadow: 'inset 0 0 10px rgba(0,0,0,0.05), 0 10px 30px rgba(0,0,0,0.1)',
                     }}
                 />
@@ -92,7 +98,8 @@ export const StudioPreview = memo(function StudioPreview({ fabricSetup, children
                         style={{
                             width: marginW,
                             height: marginH,
-                            borderRadius: shape === 'round' ? '50%' : '8px',
+                            borderRadius: shape === 'round' ? '50%' : shape === 'oval' ? '9999px' : '0',
+                            clipPath: hoopClipPath,
                         }}
                     >
                         <div className="absolute -top-8 px-3 py-1 bg-black/5 rounded-full backdrop-blur-md">

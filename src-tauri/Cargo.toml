@@ -29,6 +29,7 @@ opener = "0.8"
 # Image processing
 image = "0.25"
 rayon = "1.10"
+sha2 = "0.10"
 
 # Color science (CIEDE2000 Delta-E)
 palette = "0.7"

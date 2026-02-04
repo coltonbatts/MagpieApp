@@ -8,6 +8,7 @@ import {
 } from '@/model/manual-edits'
 import type {
   BuildArtifact,
+  ColoringBookData,
   FabricSetup,
   ManualStitchEdit,
   ManualStitchEdits,
@@ -39,6 +40,12 @@ export interface PatternState {
   buildArtifact: BuildArtifact | null
   buildStatus: 'idle' | 'building' | 'ready' | 'error'
   buildError: string | null
+  coloringBookData: ColoringBookData | null
+  coloringBookStatus: 'idle' | 'processing' | 'ready' | 'error'
+  coloringBookError: string | null
+  coloringBookLineWeight: number
+  coloringBookSaturation: number
+  coloringBookOutlineIntensity: number
   buildLockHash: string | null
   hoverRegionId: number | null
   activeRegionId: number | null
@@ -63,6 +70,11 @@ export interface PatternState {
   setPattern: (pattern: Pattern | null) => void
   setBuildArtifact: (artifact: BuildArtifact | null, status?: PatternState['buildStatus']) => void
   setBuildStatus: (status: PatternState['buildStatus'], error?: string | null) => void
+  setColoringBookData: (data: ColoringBookData | null) => void
+  setColoringBookStatus: (status: PatternState['coloringBookStatus'], error?: string | null) => void
+  setColoringBookLineWeight: (lineWeight: number) => void
+  setColoringBookSaturation: (saturation: number) => void
+  setColoringBookOutlineIntensity: (intensity: number) => void
   setHoverRegionId: (id: number | null) => void
   setActiveRegionId: (id: number | null) => void
   toggleRegionDone: (id: number) => void
@@ -117,6 +129,12 @@ export const usePatternStore = create<PatternState>((set) => ({
   buildArtifact: null,
   buildStatus: 'idle',
   buildError: null,
+  coloringBookData: null,
+  coloringBookStatus: 'idle',
+  coloringBookError: null,
+  coloringBookLineWeight: 1.5,
+  coloringBookSaturation: 100,
+  coloringBookOutlineIntensity: 100,
   buildLockHash: null,
   hoverRegionId: null,
   activeRegionId: null,
@@ -157,6 +175,12 @@ export const usePatternStore = create<PatternState>((set) => ({
       buildArtifact: null,
       buildStatus: 'idle',
       buildError: null,
+      coloringBookData: null,
+      coloringBookStatus: 'idle',
+      coloringBookError: null,
+      coloringBookLineWeight: 1.5,
+      coloringBookSaturation: 100,
+      coloringBookOutlineIntensity: 100,
       buildLockHash: null,
       hoverRegionId: null,
       activeRegionId: null,
@@ -231,6 +255,12 @@ export const usePatternStore = create<PatternState>((set) => ({
       buildArtifact: null,
       buildStatus: 'idle',
       buildError: null,
+      coloringBookData: null,
+      coloringBookStatus: 'idle',
+      coloringBookError: null,
+      coloringBookLineWeight: 1.5,
+      coloringBookSaturation: 100,
+      coloringBookOutlineIntensity: 100,
       buildLockHash: null,
       hoverRegionId: null,
       activeRegionId: null,
@@ -254,6 +284,26 @@ export const usePatternStore = create<PatternState>((set) => ({
       }
     }),
   setBuildStatus: (buildStatus, error = null) => set({ buildStatus, buildError: error }),
+  setColoringBookData: (coloringBookData) =>
+    set({
+      coloringBookData,
+      coloringBookStatus: coloringBookData ? 'ready' : 'idle',
+      coloringBookError: null,
+    }),
+  setColoringBookStatus: (coloringBookStatus, error = null) =>
+    set({ coloringBookStatus, coloringBookError: error }),
+  setColoringBookLineWeight: (lineWeight) =>
+    set({
+      coloringBookLineWeight: Math.max(0.5, Math.min(4, lineWeight)),
+    }),
+  setColoringBookSaturation: (saturation) =>
+    set({
+      coloringBookSaturation: Math.max(0, Math.min(100, Math.round(saturation))),
+    }),
+  setColoringBookOutlineIntensity: (intensity) =>
+    set({
+      coloringBookOutlineIntensity: Math.max(0, Math.min(100, Math.round(intensity))),
+    }),
   setHoverRegionId: (hoverRegionId) => set({ hoverRegionId }),
   setActiveRegionId: (activeRegionId) => set({ activeRegionId }),
   toggleRegionDone: (id) =>
@@ -325,6 +375,12 @@ export const usePatternStore = create<PatternState>((set) => ({
         buildArtifact: null,
         buildStatus: 'idle',
         buildError: null,
+        coloringBookData: null,
+        coloringBookStatus: 'idle',
+        coloringBookError: null,
+        coloringBookLineWeight: 1.5,
+        coloringBookSaturation: 100,
+        coloringBookOutlineIntensity: 100,
         buildLockHash: null,
         hoverRegionId: null,
         activeRegionId: null,
