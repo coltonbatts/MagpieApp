@@ -11,13 +11,12 @@ const HOOP_OPTIONS: Array<{
   shape: HoopShape
   sizeMm: number
   label: string
-  subtitle: string
   icon: string
 }> = [
-  { shape: 'round', sizeMm: 177, label: 'Round 7"', subtitle: 'Great for portraits', icon: 'O' },
-  { shape: 'square', sizeMm: 180, label: 'Square 7"', subtitle: 'Clean geometric framing', icon: '[ ]' },
-  { shape: 'oval', sizeMm: 220, label: 'Oval 8.5"', subtitle: 'Lovely for florals', icon: '( )' },
-  { shape: 'round', sizeMm: 254, label: 'Round 10"', subtitle: 'Balanced starter size', icon: 'O' },
+  { shape: 'round', sizeMm: 177, label: 'Round 7"', icon: 'O' },
+  { shape: 'square', sizeMm: 180, label: 'Square 7"', icon: '[ ]' },
+  { shape: 'oval', sizeMm: 220, label: 'Oval 8.5"', icon: '( )' },
+  { shape: 'round', sizeMm: 254, label: 'Round 10"', icon: 'O' },
 ]
 
 interface NewProjectDraft {
@@ -43,7 +42,6 @@ export function HomeHub({ onCreateProject, onOpenProject }: HomeHubProps) {
     hoopShape: 'round',
     hoopSizeMm: 254,
   })
-  const [easterEgg, setEasterEgg] = useState('Pick your hoop to start stitching magic.')
   const [error, setError] = useState<string | null>(null)
 
   const canCreate = useMemo(
@@ -105,12 +103,9 @@ export function HomeHub({ onCreateProject, onOpenProject }: HomeHubProps) {
     }
   }
 
-  function chooseHoop(shape: HoopShape, sizeMm: number, note: string) {
+  function chooseHoop(shape: HoopShape, sizeMm: number) {
     setDraft((current) => ({ ...current, hoopShape: shape, hoopSizeMm: sizeMm }))
-    setEasterEgg(note)
   }
-
-  const selectedHoop = HOOP_OPTIONS.find((option) => option.shape === draft.hoopShape && option.sizeMm === draft.hoopSizeMm)
 
   return (
     <div className="hub-bg min-h-screen overflow-auto">
@@ -118,9 +113,6 @@ export function HomeHub({ onCreateProject, onOpenProject }: HomeHubProps) {
         <header className="mb-10 flex w-full flex-col items-center gap-3 text-center">
           <MascotEyes inline />
           <h1 className="text-4xl font-semibold tracking-tight text-fg">Project Hub</h1>
-          <p className="max-w-xl text-sm text-fg-muted">
-            Cozy, clean, and ready: pick your hoop, name your piece, then bring in your reference image.
-          </p>
         </header>
 
         {error && (
@@ -143,7 +135,6 @@ export function HomeHub({ onCreateProject, onOpenProject }: HomeHubProps) {
             <div className="space-y-6">
               <div>
                 <p className="text-lg font-semibold text-fg">Step 1 - Pick your hoop size</p>
-                <p className="mt-1 text-sm text-fg-muted">This sets the vibe and starting canvas proportions.</p>
               </div>
 
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -153,8 +144,7 @@ export function HomeHub({ onCreateProject, onOpenProject }: HomeHubProps) {
                     <button
                       key={`${option.shape}-${option.sizeMm}`}
                       type="button"
-                      onClick={() => chooseHoop(option.shape, option.sizeMm, `${option.label} selected. Great taste.`)}
-                      onMouseEnter={() => setEasterEgg(`Tiny secret: ${option.subtitle.toLowerCase()}.`)}
+                      onClick={() => chooseHoop(option.shape, option.sizeMm)}
                       className={`rounded-2xl border p-4 text-left transition-all duration-200 ${
                         selected
                           ? 'border-border-strong bg-accent-soft shadow-sm'
@@ -163,21 +153,13 @@ export function HomeHub({ onCreateProject, onOpenProject }: HomeHubProps) {
                     >
                       <div className="mb-2 text-xl text-fg">{option.icon}</div>
                       <p className="text-sm font-semibold text-fg">{option.label}</p>
-                      <p className="text-xs text-fg-subtle">{option.subtitle}</p>
                     </button>
                   )
                 })}
               </div>
 
-              <div className="rounded-xl border border-border/70 bg-bg/80 px-4 py-3 text-xs text-fg-muted">
-                {easterEgg}
-              </div>
-
               <div className="border-t border-border/60 pt-5">
                 <p className="text-lg font-semibold text-fg">Step 2 - Name and reference</p>
-                <p className="mt-1 text-sm text-fg-muted">
-                  Selected hoop: <span className="font-semibold text-fg">{selectedHoop?.label ?? 'Round 10"'}</span>
-                </p>
               </div>
 
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -218,11 +200,7 @@ export function HomeHub({ onCreateProject, onOpenProject }: HomeHubProps) {
                 </Button>
               </div>
             </div>
-          ) : (
-            <div className="rounded-xl border border-dashed border-border bg-bg/70 px-4 py-8 text-center text-sm text-fg-muted">
-              Ready when you are. Tap <span className="font-semibold text-fg">Start New</span> to spin up a fresh project.
-            </div>
-          )}
+          ) : null}
         </section>
 
         <section className="mt-8 w-full">
@@ -235,9 +213,7 @@ export function HomeHub({ onCreateProject, onOpenProject }: HomeHubProps) {
           {loading ? (
             <p className="text-sm text-fg-muted">Loading projects...</p>
           ) : projects.length === 0 ? (
-            <div className="rounded-xl border border-border bg-surface/80 p-6 text-sm text-fg-muted">
-              No saved projects yet. Create one to start your workspace.
-            </div>
+            <div className="rounded-xl border border-border bg-surface/80 p-6 text-sm text-fg-muted">No saved projects yet.</div>
           ) : (
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
               {projects.map((project) => (
