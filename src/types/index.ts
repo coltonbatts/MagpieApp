@@ -174,3 +174,33 @@ export interface PatternRegion {
   centroidY: number
   loops: GridPoint[][]
 }
+
+export interface RegionBBox {
+  x0: number
+  y0: number
+  x1: number
+  y1: number
+}
+
+export interface BuildRegion {
+  id: number
+  colorIndex: number
+  colorKey: string
+  dmcCode: string
+  hex: string
+  bbox: RegionBBox
+  area: number
+}
+
+export interface BuildArtifact {
+  lockHash: string
+  width: number
+  height: number
+  regions: BuildRegion[]
+  pixelRegionId: Uint32Array
+  regionsByColor: number[][]
+  labelPointByRegionId?: Array<GridPoint | null>
+  adjacency?: number[][]
+  allBoundarySegments?: number[]
+  outlineSegmentsByRegionId?: Array<number[] | null>
+}

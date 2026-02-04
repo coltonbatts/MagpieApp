@@ -1,121 +1,16 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { invoke } from '@tauri-apps/api/core'
 import type * as PIXINamespace from 'pixi.js'
 import type { Viewport } from 'pixi-viewport'
 import { Pattern } from '@/model/Pattern'
-import { ManualStitchEdit, SelectionArtifact, ProcessingConfig } from '@/types'
+import { BuildArtifact, ManualStitchEdit, SelectionArtifact, ProcessingConfig } from '@/types'
 import { VIEWER } from '@/lib/constants'
-import { createViewport, fitViewportToWorld } from './viewport-config'
+import { createViewport, fitViewportToWorld, setViewportInteractionEnabled } from './viewport-config'
 import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
 import { linearRgbToOkLab, okLabDistanceSqWeighted } from '@/processing/color-spaces'
 import { getProcessedPaths, type Point } from '@/processing/vectorize'
 import { Button, Select, SegmentedControl, Toggle } from '@/components/ui'
 import { incrementDevCounter } from '@/lib/dev-instrumentation'
-import { PatternRegion } from '@/types'
-
-const REGION_RESULT_CACHE = new Map<string, PatternRegion[]>()
-const REGION_RESULT_CACHE_LIMIT = 16
-
-function cacheRegions(signature: string, regions: PatternRegion[]) {
-  if (!REGION_RESULT_CACHE.has(signature) && REGION_RESULT_CACHE.size >= REGION_RESULT_CACHE_LIMIT) {
-    const firstKey = REGION_RESULT_CACHE.keys().next().value
-    if (firstKey) {
-      REGION_RESULT_CACHE.delete(firstKey)
-    }
-  }
-  REGION_RESULT_CACHE.set(signature, regions)
-}
-
-function fnv1aHashString(seed: number, value: string): number {
-  let hash = seed >>> 0
-  for (let i = 0; i < value.length; i += 1) {
-    hash ^= value.charCodeAt(i)
-    hash = Math.imul(hash, 0x01000193) >>> 0
-  }
-  return hash >>> 0
-}
-
-function buildPatternRegionSignature(pattern: Pattern): string {
-  let hash = 0x811c9dc5
-  hash = fnv1aHashString(hash, `${pattern.width}x${pattern.height}`)
-  hash = fnv1aHashString(hash, `sel:${pattern.selection?.id ?? 'none'}`)
-  for (const stitch of pattern.stitches) {
-    hash = fnv1aHashString(hash, `${stitch.x},${stitch.y},${stitch.dmcCode},${stitch.hex}`)
-  }
-  return hash.toString(16)
-}
-
-function toRegionPayload(pattern: Pattern) {
-  return {
-    width: pattern.width,
-    height: pattern.height,
-    stitches: pattern.stitches.map((s) => ({
-      x: s.x,
-      y: s.y,
-      dmc_code: s.dmcCode,
-      hex: s.hex,
-    })),
-    legend: pattern.getLegend().map((l) => ({
-      dmc_code: l.dmcCode,
-      hex: l.hex,
-    })),
-  }
-}
-
-function usePatternRegions(pattern: Pattern | null) {
-  const [regions, setRegions] = useState<PatternRegion[]>([])
-  const [isComputing, setIsComputing] = useState(false)
-  const inFlightSignature = useRef<string | null>(null)
-  const patternSignature = useMemo(
-    () => (pattern ? buildPatternRegionSignature(pattern) : null),
-    [pattern]
-  )
-
-  useEffect(() => {
-    if (!pattern || !patternSignature) {
-      setRegions([])
-      setIsComputing(false)
-      return
-    }
-
-    const cached = REGION_RESULT_CACHE.get(patternSignature)
-    if (cached) {
-      setRegions(cached)
-      setIsComputing(false)
-      return
-    }
-    if (inFlightSignature.current === patternSignature) return
-
-    let canceled = false
-    inFlightSignature.current = patternSignature
-    setIsComputing(true)
-
-    const payload = toRegionPayload(pattern)
-
-    invoke<PatternRegion[]>('compute_pattern_regions', { payload })
-      .then((res) => {
-        if (!canceled) {
-          cacheRegions(patternSignature, res)
-          setRegions(res)
-          setIsComputing(false)
-          inFlightSignature.current = null
-        }
-      })
-      .catch((err) => {
-        console.error('Failed to compute regions:', err)
-        if (!canceled) setIsComputing(false)
-        inFlightSignature.current = null
-      })
-
-    return () => {
-      canceled = true
-      inFlightSignature.current = null
-    }
-  }, [pattern, patternSignature])
-
-  return { regions, isComputing }
-}
 
 export interface PatternViewerProps {
   pattern: Pattern | null
@@ -135,8 +30,6 @@ export interface PatternViewerProps {
   onEditToolChange?: (tool: 'paint' | 'fabric') => void
   selectedPaintValue?: string
   onSelectedPaintValueChange?: (value: string) => void
-  hoveredRegionId?: number | null
-  onHoveredRegionIdChange?: (id: number | null) => void
 }
 
 export function PatternViewer({
@@ -157,10 +50,18 @@ export function PatternViewer({
   onEditToolChange,
   selectedPaintValue: controlledSelectedPaintValue,
   onSelectedPaintValueChange,
-  hoveredRegionId: controlledHoveredRegionId,
-  onHoveredRegionIdChange,
 }: PatternViewerProps) {
   const { workflowStage } = useUIStore()
+  const compositionLocked = usePatternStore((state) => state.compositionLocked)
+  const buildArtifact = usePatternStore((state) => state.buildArtifact)
+  const hoverRegionId = usePatternStore((state) => state.hoverRegionId)
+  const activeRegionId = usePatternStore((state) => state.activeRegionId)
+  const doneRegionIds = usePatternStore((state) => state.doneRegionIds)
+  const setHoverRegionId = usePatternStore((state) => state.setHoverRegionId)
+  const setActiveRegionId = usePatternStore((state) => state.setActiveRegionId)
+  const toggleRegionDone = usePatternStore((state) => state.toggleRegionDone)
+  const stageAllowsCompositionEditing = workflowStage === 'Reference' || workflowStage === 'Select'
+  const compositionInteractionEnabled = !compositionLocked && stageAllowsCompositionEditing
 
   // Local fallbacks if not controlled
   const [internalActiveTab, setInternalActiveTab] = useState<'finished' | 'pattern'>('finished')
@@ -198,13 +99,6 @@ export function PatternViewer({
   const setShowOutlines = (show: boolean) => {
     onShowOutlinesChange?.(show)
     setInternalShowOutlines(show)
-  }
-
-  const [internalHoveredRegionId, setInternalHoveredRegionId] = useState<number | null>(null)
-  const hoveredRegionId = controlledHoveredRegionId ?? internalHoveredRegionId
-  const setHoveredRegionId = (id: number | null) => {
-    onHoveredRegionIdChange?.(id)
-    setInternalHoveredRegionId(id)
   }
 
   // Sync stage to tab
@@ -271,18 +165,6 @@ export function PatternViewer({
     () => (pattern ? getFabricIndices(pattern, processingConfig) : new Set<number>()),
     [pattern, processingConfig]
   )
-  const { regions } = usePatternRegions(pattern)
-
-  useEffect(() => {
-    if (!regions.length) {
-      setHoveredRegionId(null)
-      return
-    }
-    if (hoveredRegionId === null) return
-    if (!regions.some((region) => region.id === hoveredRegionId)) {
-      setHoveredRegionId(null)
-    }
-  }, [regions, hoveredRegionId])
 
   const paths = useMemo(() => {
     if (!pattern || !pattern.labels || !pattern.paletteHex) return []
@@ -324,6 +206,20 @@ export function PatternViewer({
     if (paintOptions.some((option) => option.id === selectedPaintValue)) return
     setSelectedPaintValue(paintOptions[0].id)
   }, [paintOptions, selectedPaintValue])
+
+  useEffect(() => {
+    if (!buildArtifact) {
+      if (hoverRegionId !== null) setHoverRegionId(null)
+      if (activeRegionId !== null) setActiveRegionId(null)
+      return
+    }
+    if (hoverRegionId !== null && hoverRegionId > buildArtifact.regions.length) {
+      setHoverRegionId(null)
+    }
+    if (activeRegionId !== null && activeRegionId > buildArtifact.regions.length) {
+      setActiveRegionId(null)
+    }
+  }, [activeRegionId, buildArtifact, hoverRegionId, setActiveRegionId, setHoverRegionId])
 
   useEffect(() => {
     const container = containerRef.current
@@ -403,6 +299,7 @@ export function PatternViewer({
           container.clientWidth || window.innerWidth,
           container.clientHeight || window.innerHeight
         )
+        setViewportInteractionEnabled(viewport, compositionInteractionEnabled)
         const markUserTransformed = (event?: { type?: string }) => {
           const type = event?.type
           if (type === 'drag' || type === 'wheel' || type === 'pinch') {
@@ -444,8 +341,14 @@ export function PatternViewer({
     }
   }, [isDev])
 
+  useEffect(() => {
+    const viewport = viewportRef.current
+    if (!viewport) return
+    setViewportInteractionEnabled(viewport, compositionInteractionEnabled)
+  }, [compositionInteractionEnabled])
+
   const handleFitToView = () => {
-    if (!viewportRef.current || !pattern) return
+    if (!viewportRef.current || !pattern || !compositionInteractionEnabled) return
     fitViewportToWorld(
       viewportRef.current,
       worldSizeRef.current.width,
@@ -543,6 +446,44 @@ export function PatternViewer({
     flushPendingManualEdits()
   }, [flushPendingManualEdits])
 
+  const getRegionIdFromPointer = useCallback((event: React.PointerEvent<HTMLDivElement>): number | null => {
+    if (!buildArtifact || !viewportRef.current) return null
+    const bounds = event.currentTarget.getBoundingClientRect()
+    const screenX = event.clientX - bounds.left
+    const screenY = event.clientY - bounds.top
+    const world = viewportRef.current.toWorld(screenX, screenY)
+    const x = Math.floor(world.x / VIEWER.CELL_SIZE)
+    const y = Math.floor(world.y / VIEWER.CELL_SIZE)
+    if (x < 0 || y < 0 || x >= buildArtifact.width || y >= buildArtifact.height) return null
+    const regionId = buildArtifact.pixelRegionId[y * buildArtifact.width + x]
+    return regionId > 0 ? regionId : null
+  }, [buildArtifact])
+
+  const handleRegionPointerMove = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const nextRegionId = getRegionIdFromPointer(event)
+    if (nextRegionId !== hoverRegionId) {
+      setHoverRegionId(nextRegionId)
+    }
+  }, [getRegionIdFromPointer, hoverRegionId, setHoverRegionId])
+
+  const handleRegionPointerLeave = useCallback(() => {
+    if (hoverRegionId !== null) {
+      setHoverRegionId(null)
+    }
+  }, [hoverRegionId, setHoverRegionId])
+
+  const handleRegionPointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    const regionId = getRegionIdFromPointer(event)
+    if (regionId === null) {
+      setActiveRegionId(null)
+      return
+    }
+    setActiveRegionId(regionId)
+    if (event.detail >= 2) {
+      toggleRegionDone(regionId)
+    }
+  }, [getRegionIdFromPointer, setActiveRegionId, toggleRegionDone])
+
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
@@ -596,11 +537,11 @@ export function PatternViewer({
       config: processingConfig,
       selection: pattern.selection,
       paths, // Pass memoized paths
-      regions,
+      buildArtifact,
       viewMode,
       highlightColorKey,
-      hoveredRegionId,
-      onRegionHover: setHoveredRegionId,
+      activeRegionId,
+      doneRegionIds,
       onClearHighlight: () => setHighlightColorKey(null),
     })
     if (isEditingStrokeRef.current) {
@@ -620,12 +561,45 @@ export function PatternViewer({
     showOutlines,
     processingConfig,
     paths,
-    regions,
+    buildArtifact,
     viewMode,
     highlightColorKey,
-    hoveredRegionId,
+    activeRegionId,
+    doneRegionIds,
     setHighlightColorKey,
   ])
+
+  useEffect(() => {
+    if (!isReady || !pixiRef.current || !viewportRef.current || !buildArtifact) return
+    if (workflowStage !== 'Build' || activeTab !== 'pattern' || viewMode !== 'Regions') return
+    if (!hoverRegionId) return
+
+    const region = buildArtifact.regions[hoverRegionId - 1]
+    if (!region) return
+
+    const overlay = new pixiRef.current.Graphics()
+    const regionSegments = buildArtifact.outlineSegmentsByRegionId?.[region.id]
+    if (regionSegments) {
+      drawBoundarySegments(overlay, regionSegments, VIEWER.CELL_SIZE)
+    } else {
+      drawRegionBoundaries(
+        overlay,
+        buildArtifact.pixelRegionId,
+        buildArtifact.width,
+        buildArtifact.height,
+        VIEWER.CELL_SIZE,
+        (id) => id === region.id
+      )
+    }
+    overlay.setStrokeStyle({ width: 2.2, color: 0x111827, alpha: 0.95 })
+    overlay.stroke()
+    overlay.label = 'hover-overlay'
+    viewportRef.current.addChild(overlay)
+
+    return () => {
+      overlay.destroy()
+    }
+  }, [activeTab, buildArtifact, hoverRegionId, isReady, viewMode, workflowStage])
 
   if (viewerError) {
     return (
@@ -691,20 +665,22 @@ export function PatternViewer({
         </div>
       )}
 
-      <div className="absolute right-4 top-4 z-10">
-        <div className="rounded-lg border border-border bg-overlay/95 p-1 shadow-sm backdrop-blur">
-          <Button
-            type="button"
-            onClick={handleFitToView}
-            disabled={!pattern}
-            size="sm"
-            variant="secondary"
-            className="min-w-14"
-          >
-            Fit
-          </Button>
+      {compositionInteractionEnabled && (
+        <div className="absolute right-4 top-4 z-10">
+          <div className="rounded-lg border border-border bg-overlay/95 p-1 shadow-sm backdrop-blur">
+            <Button
+              type="button"
+              onClick={handleFitToView}
+              disabled={!pattern}
+              size="sm"
+              variant="secondary"
+              className="min-w-14"
+            >
+              Fit
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
 
       {!controlledActiveTab && activeTab === 'pattern' && editModeEnabled && (
         <div className="absolute bottom-4 left-4 z-20 flex w-80 flex-col gap-2 rounded-lg border border-border bg-overlay/95 p-3 shadow-sm backdrop-blur">
@@ -772,6 +748,19 @@ export function PatternViewer({
           onPointerLeave={endEditStroke}
         />
       )}
+      {workflowStage === 'Build' &&
+        activeTab === 'pattern' &&
+        viewMode === 'Regions' &&
+        !editModeEnabled &&
+        buildArtifact && (
+          <div
+            className="absolute inset-0 z-[4] touch-none"
+            onPointerMove={handleRegionPointerMove}
+            onPointerDown={handleRegionPointerDown}
+            onPointerLeave={handleRegionPointerLeave}
+            onPointerCancel={handleRegionPointerLeave}
+          />
+        )}
       {isDev && debugText && (
         <pre className="pointer-events-none absolute top-14 left-4 z-10 whitespace-pre rounded-md border border-border bg-overlay/95 px-3 py-2 font-mono text-[11px] leading-4 text-fg-muted shadow-sm">
           {debugText}
@@ -803,11 +792,12 @@ interface RenderOptions {
   config: ProcessingConfig
   selection: SelectionArtifact | null
   paths: any[]
-  regions?: PatternRegion[]
+  buildArtifact?: BuildArtifact | null
   viewMode?: 'Regions' | 'Grid'
   highlightColorKey?: string | null
-  hoveredRegionId?: number | null
-  onRegionHover?: (regionId: number | null) => void
+  activeRegionId?: number | null
+  hoverRegionId?: number | null
+  doneRegionIds?: number[]
   onClearHighlight?: () => void
 }
 
@@ -831,7 +821,6 @@ function renderPattern(
       bg.eventMode = 'static'
       bg.on('pointertap', () => {
         options.onClearHighlight?.()
-        options.onRegionHover?.(null)
       })
     }
     viewport.addChild(bg)
@@ -853,64 +842,75 @@ function renderRegionView(
   pattern: Pattern,
   options: RenderOptions
 ) {
-  const {
-    regions,
-    highlightColorKey,
-    showOutlines,
-    showLabels,
-    hoveredRegionId,
-    onRegionHover,
-  } = options
-  if (!regions || regions.length === 0) {
+  const { buildArtifact, highlightColorKey, showOutlines, showLabels, activeRegionId, doneRegionIds } = options
+  if (!buildArtifact || buildArtifact.regions.length === 0) {
     // Fallback to pattern preview if no regions yet
     renderPatternPreview(PIXI, viewport, pattern, options)
     return
   }
 
   const cellSize = VIEWER.CELL_SIZE
-  const isHighlighting = !!highlightColorKey
+  const doneSet = new Set(doneRegionIds ?? [])
 
-  regions.forEach((region) => {
-    const isTarget = isHighlighting && region.colorKey === highlightColorKey
-    const isHovered = hoveredRegionId === region.id
-    const color = parseInt(region.hex.slice(1), 16)
-    const loopPoints = region.loops.map((loop) => loop.map((p) => ({ x: p.x * cellSize, y: p.y * cellSize })))
-    const dimAlpha = isHighlighting && !isTarget ? 0.12 : 1
+  if (showOutlines) {
+    const outlines = new PIXI.Graphics()
+    if (buildArtifact.allBoundarySegments) {
+      drawBoundarySegments(outlines, buildArtifact.allBoundarySegments, cellSize)
+    } else {
+      drawRegionBoundaries(outlines, buildArtifact.pixelRegionId, buildArtifact.width, buildArtifact.height, cellSize, () => true)
+    }
+    outlines.setStrokeStyle({ width: 0.85, color: 0x9ca3af, alpha: 0.55 })
+    outlines.stroke()
+    viewport.addChild(outlines)
+  }
 
-    if (isTarget || isHovered) {
+  if (highlightColorKey) {
+    const dim = new PIXI.Graphics()
+    dim.rect(0, 0, buildArtifact.width * cellSize, buildArtifact.height * cellSize)
+    dim.fill({ color: 0xffffff, alpha: 0.78 })
+    viewport.addChild(dim)
+  }
+
+  for (const region of buildArtifact.regions) {
+    const isHighlighted = highlightColorKey === region.colorKey
+    const isActive = activeRegionId === region.id
+    const isDone = doneSet.has(region.id)
+    if (!isHighlighted && !isActive && !isDone) continue
+    const shouldDrawFill = isHighlighted || isActive
+    if (shouldDrawFill) {
+      const color = parseInt(region.hex.slice(1), 16)
       const fill = new PIXI.Graphics()
-      for (const loop of loopPoints) {
-        fill.poly(loop)
-      }
-      fill.fill({ color, alpha: isTarget ? 0.16 : 0.08 })
-      fill.alpha = dimAlpha
+      drawRegionFill(fill, buildArtifact.pixelRegionId, buildArtifact.width, region.id, region.bbox, cellSize)
+      fill.fill({
+        color,
+        alpha: isActive ? 0.28 : 0.18,
+      })
       viewport.addChild(fill)
     }
 
-    if (showOutlines || isTarget || isHovered) {
-      const outline = new PIXI.Graphics()
-      for (const loop of loopPoints) {
-        outline.poly(loop)
-      }
-      outline.setStrokeStyle({
-        width: isTarget ? 2.25 : isHovered ? 1.8 : 0.85,
-        color: isTarget ? 0x111827 : 0x9ca3af,
-        alpha: isTarget ? 0.9 : isHovered ? 0.7 : 0.5,
-      })
-      outline.stroke()
-      outline.alpha = dimAlpha
-      outline.eventMode = 'static'
-      outline.cursor = 'pointer'
-      outline.on('pointerover', () => onRegionHover?.(region.id))
-      outline.on('pointerout', () => onRegionHover?.(null))
-      outline.on('pointertap', (event: any) => {
-        event.stopPropagation?.()
-      })
-      viewport.addChild(outline)
+    const outline = new PIXI.Graphics()
+    const regionSegments = buildArtifact.outlineSegmentsByRegionId?.[region.id]
+    if (regionSegments) {
+      drawBoundarySegments(outline, regionSegments, cellSize)
+    } else {
+      drawRegionBoundaries(outline, buildArtifact.pixelRegionId, buildArtifact.width, buildArtifact.height, cellSize, (id) => id === region.id)
     }
+    outline.setStrokeStyle({
+      width: isActive ? 2.1 : 1.45,
+      color: isDone ? 0x065f46 : 0x111827,
+      alpha: 0.95,
+    })
+    outline.stroke()
+    viewport.addChild(outline)
+  }
 
-    if (showLabels && (region.area > 4 || isTarget)) {
-      const labelAlpha = isHighlighting ? (isTarget ? 1 : 0.08) : 0.75
+  if (showLabels && buildArtifact.labelPointByRegionId) {
+    for (const region of buildArtifact.regions) {
+      if (region.area <= 4 && highlightColorKey && region.colorKey !== highlightColorKey) continue
+      const point = buildArtifact.labelPointByRegionId[region.id]
+      if (!point) continue
+      const isHighlighted = region.colorKey === highlightColorKey
+      const isActive = activeRegionId === region.id
       const label = new PIXI.Text({
         text: (region.colorIndex + 1).toString(),
         style: {
@@ -918,15 +918,15 @@ function renderRegionView(
           fontSize: Math.max(7, cellSize * 0.45),
           fill: 0x000000,
           align: 'center',
-          fontWeight: isTarget || isHovered ? 'bold' : 'normal',
+          fontWeight: isActive || isHighlighted ? 'bold' : 'normal',
         },
       })
-      label.alpha = labelAlpha
+      label.alpha = highlightColorKey ? (isHighlighted ? 1 : 0.15) : 0.78
       label.anchor.set(0.5)
-      label.position.set(region.centroidX * cellSize, region.centroidY * cellSize)
+      label.position.set((point.x + 0.5) * cellSize, (point.y + 0.5) * cellSize)
       viewport.addChild(label)
     }
-  })
+  }
 }
 
 function renderFinishedPreview(
@@ -1074,6 +1074,77 @@ function renderPatternPreview(
         viewport.addChild(label)
       }
     })
+  }
+}
+
+function drawRegionFill(
+  graphics: PIXINamespace.Graphics,
+  pixelRegionId: Uint32Array,
+  width: number,
+  regionId: number,
+  bbox: { x0: number; y0: number; x1: number; y1: number },
+  cellSize: number
+) {
+  for (let y = bbox.y0; y <= bbox.y1; y += 1) {
+    const rowOffset = y * width
+    for (let x = bbox.x0; x <= bbox.x1; x += 1) {
+      if (pixelRegionId[rowOffset + x] !== regionId) continue
+      graphics.rect(x * cellSize, y * cellSize, cellSize, cellSize)
+    }
+  }
+}
+
+function drawBoundarySegments(
+  graphics: PIXINamespace.Graphics,
+  segments: number[],
+  cellSize: number
+) {
+  for (let i = 0; i < segments.length; i += 4) {
+    graphics.moveTo(segments[i] * cellSize, segments[i + 1] * cellSize)
+    graphics.lineTo(segments[i + 2] * cellSize, segments[i + 3] * cellSize)
+  }
+}
+
+function drawRegionBoundaries(
+  graphics: PIXINamespace.Graphics,
+  pixelRegionId: Uint32Array,
+  width: number,
+  height: number,
+  cellSize: number,
+  includeRegion: (regionId: number) => boolean
+) {
+  for (let y = 0; y < height; y += 1) {
+    const rowOffset = y * width
+    for (let x = 0; x < width; x += 1) {
+      const idx = rowOffset + x
+      const regionId = pixelRegionId[idx]
+      if (regionId === 0 || !includeRegion(regionId)) continue
+      const left = x === 0 ? 0 : pixelRegionId[idx - 1]
+      const right = x + 1 >= width ? 0 : pixelRegionId[idx + 1]
+      const up = y === 0 ? 0 : pixelRegionId[idx - width]
+      const down = y + 1 >= height ? 0 : pixelRegionId[idx + width]
+      const x0 = x * cellSize
+      const y0 = y * cellSize
+      const x1 = x0 + cellSize
+      const y1 = y0 + cellSize
+
+      if (left !== regionId) {
+        graphics.moveTo(x0, y0)
+        graphics.lineTo(x0, y1)
+      }
+      if (right !== regionId) {
+        graphics.moveTo(x1, y0)
+        graphics.lineTo(x1, y1)
+      }
+      if (up !== regionId) {
+        graphics.moveTo(x0, y0)
+        graphics.lineTo(x1, y0)
+      }
+      if (down !== regionId) {
+        graphics.moveTo(x0, y1)
+        graphics.lineTo(x1, y1)
+      }
+    }
   }
 }
 

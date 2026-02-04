@@ -43,11 +43,14 @@ interface MagpieProjectFileV1 {
   }
   fabricSetup: FabricSetup
   referencePlacement: ReferencePlacement | null
+  compositionLocked: boolean
   processingConfig: ProcessingConfig
   maskConfig: MaskConfig
   selection: SerializedSelection | null
   manualEdits: ManualStitchEdit[]
   manualEditTool: ManualStitchEditMode
+  buildDoneRegionIds: number[]
+  buildDoneRegionHash: string | null
 }
 
 export interface RecentProjectEntry {
@@ -79,11 +82,14 @@ export async function saveCurrentProjectToPath(path: string, workflowStage: Work
     },
     fabricSetup: state.fabricSetup,
     referencePlacement: state.referencePlacement,
+    compositionLocked: state.compositionLocked,
     processingConfig: state.processingConfig,
     maskConfig: state.maskConfig,
     selection: serializeSelection(state.selection),
     manualEdits: editsArrayFromMap(state.manualEdits),
     manualEditTool: state.manualEditTool,
+    buildDoneRegionIds: state.doneRegionIds,
+    buildDoneRegionHash: state.doneRegionLockHash,
   })
 
   await platform.writeFile({
@@ -134,12 +140,15 @@ export async function loadProjectFromPath(path: string): Promise<void> {
         selectionWorkingImage: selectionImage,
         fabricSetup: parsed.fabricSetup,
         referencePlacement: parsed.referencePlacement ?? null,
+        compositionLocked: parsed.compositionLocked,
         selection: selectionForStore,
         maskConfig: parsed.maskConfig ?? state.maskConfig,
         basePattern: null,
         pattern: null,
         manualEdits: editsMapFromArray(parsed.manualEdits ?? []),
         manualEditTool: parsed.manualEditTool ?? 'paint',
+        doneRegionIds: Array.isArray(parsed.buildDoneRegionIds) ? parsed.buildDoneRegionIds : [],
+        doneRegionLockHash: typeof parsed.buildDoneRegionHash === 'string' ? parsed.buildDoneRegionHash : null,
         processingConfig: processingConfig,
         isProcessing: false,
         error: null,
@@ -147,7 +156,7 @@ export async function loadProjectFromPath(path: string): Promise<void> {
     })
 
     const workflowStage = parsed.workflowStage ?? 'Build'
-    useUIStore.getState().setWorkflowStage(workflowStage)
+    useUIStore.getState().setWorkflowStage(workflowStage, { acknowledge: false, source: 'system' })
     rememberRecentProject(path, new Date().toISOString())
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unknown project load failure.'
@@ -267,6 +276,10 @@ function validateProjectFileV1(project: Partial<MagpieProjectFileV1>): MagpiePro
     sourceImage: project.sourceImage,
     fabricSetup: project.fabricSetup,
     referencePlacement: project.referencePlacement ?? null,
+    compositionLocked:
+      typeof project.compositionLocked === 'boolean'
+        ? project.compositionLocked
+        : (project.workflowStage === 'Build' || project.workflowStage === 'Export'),
     processingConfig: project.processingConfig,
     maskConfig: project.maskConfig ?? {
       brushSize: 20,
@@ -275,6 +288,10 @@ function validateProjectFileV1(project: Partial<MagpieProjectFileV1>): MagpiePro
     selection: project.selection ?? null,
     manualEdits: Array.isArray(project.manualEdits) ? project.manualEdits : [],
     manualEditTool: project.manualEditTool === 'fabric' ? 'fabric' : 'paint',
+    buildDoneRegionIds: Array.isArray(project.buildDoneRegionIds)
+      ? project.buildDoneRegionIds.filter((id): id is number => Number.isInteger(id) && id > 0)
+      : [],
+    buildDoneRegionHash: typeof project.buildDoneRegionHash === 'string' ? project.buildDoneRegionHash : null,
   }
 }
 

@@ -1,4 +1,4 @@
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
 import { PatternViewer } from '@/viewer/PatternViewer'
@@ -6,6 +6,7 @@ import { StudioPreview } from './StudioPreview'
 import { Legend } from '../Legend'
 import { Button, Slider, SegmentedControl, Toggle } from '@/components/ui'
 import { PROCESSING } from '@/lib/constants'
+import { buildArtifactFromPattern, computeBuildLockHash } from '@/processing/region-graph'
 
 export function BuildStage() {
     const {
@@ -13,6 +14,14 @@ export function BuildStage() {
         processingConfig,
         setProcessingConfig,
         isProcessing,
+        compositionLocked,
+        buildArtifact,
+        buildStatus,
+        buildError,
+        activeRegionId,
+        toggleRegionDone,
+        setBuildArtifact,
+        setBuildStatus,
     } = usePatternStore()
 
     const {
@@ -29,7 +38,6 @@ export function BuildStage() {
     const [editModeEnabled, setEditModeEnabled] = useState(false)
     const [editTool, setEditTool] = useState<'paint' | 'fabric'>('paint')
     const [selectedPaintValue, setSelectedPaintValue] = useState<string>('')
-    const [hoveredRegionId, setHoveredRegionId] = useState<number | null>(null)
     const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
 
     // Derived "Organic Detail" value (0..1)
@@ -47,6 +55,49 @@ export function BuildStage() {
         })
     }, [setProcessingConfig])
 
+    useEffect(() => {
+        if (!compositionLocked || !pattern) return
+
+        // Build artifact is derived once per deterministic lock hash, not per hover/select interaction.
+        const lockHash = computeBuildLockHash(pattern)
+        if (buildArtifact && buildArtifact.lockHash === lockHash) {
+            if (buildStatus !== 'ready') {
+                setBuildStatus('ready', null)
+            }
+            return
+        }
+
+        setBuildStatus('building', null)
+        const task = window.requestAnimationFrame(() => {
+            try {
+                const startedAt = import.meta.env.DEV ? performance.now() : 0
+                const nextArtifact = buildArtifactFromPattern(pattern)
+                if (import.meta.env.DEV) {
+                    const tookMs = performance.now() - startedAt
+                    console.info('[BuildStage] RegionGraph build', {
+                        tookMs: Math.round(tookMs * 100) / 100,
+                        width: nextArtifact.width,
+                        height: nextArtifact.height,
+                        regions: nextArtifact.regions.length,
+                    })
+                }
+                setBuildArtifact(nextArtifact, 'ready')
+            } catch (error) {
+                const message = error instanceof Error ? error.message : 'Build artifact generation failed.'
+                setBuildStatus('error', message)
+            }
+        })
+
+        return () => window.cancelAnimationFrame(task)
+    }, [
+        buildArtifact,
+        buildStatus,
+        compositionLocked,
+        pattern,
+        setBuildArtifact,
+        setBuildStatus,
+    ])
+
     return (
         <div className="flex h-full w-full overflow-hidden bg-bg relative">
             {/* Sidebar: Build Controls */}
@@ -58,6 +109,13 @@ export function BuildStage() {
                         <header>
                             <h2 className="text-xl font-bold tracking-tight text-fg">Build Pattern</h2>
                             <p className="text-sm text-fg-muted">Fine-tune your embroidery blueprint.</p>
+                            {compositionLocked && (
+                                <div className="mt-3 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1">
+                                    <span className="text-[10px] font-bold uppercase tracking-wider text-emerald-700">
+                                        Composition Locked
+                                    </span>
+                                </div>
+                            )}
                         </header>
 
                         <section className="space-y-6">
@@ -165,8 +223,24 @@ export function BuildStage() {
                         <section className="space-y-6 border-t border-border/50 pt-6 pb-4">
                             <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-fg-subtle">Thread Manifest</h3>
                             <div className="bg-surface-2 rounded-xl border border-border/50 overflow-hidden">
-                                <Legend />
+                                <Legend mode="build" />
                             </div>
+                            {buildStatus === 'building' && (
+                                <p className="text-xs text-fg-subtle">Computing regions...</p>
+                            )}
+                            {buildStatus === 'error' && buildError && (
+                                <p className="text-xs text-red-600">{buildError}</p>
+                            )}
+                            {activeRegionId && (
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    className="w-full"
+                                    onClick={() => toggleRegionDone(activeRegionId)}
+                                >
+                                    Toggle Active Region Complete
+                                </Button>
+                            )}
                         </section>
                     </div>
                 </div>
@@ -177,14 +251,14 @@ export function BuildStage() {
                         <Button
                             className="flex-1 h-12 text-sm font-bold tracking-tight"
                             variant="secondary"
-                            onClick={() => setWorkflowStage('Select')}
+                            onClick={() => setWorkflowStage('Select', { source: 'cta' })}
                         >
                             Back
                         </Button>
                         <Button
                             className="flex-[2] h-12 text-sm font-bold tracking-tight shadow-xl"
                             variant="primary"
-                            onClick={() => setWorkflowStage('Export')}
+                            onClick={() => setWorkflowStage('Export', { source: 'cta' })}
                         >
                             Confirm & Export
                         </Button>
@@ -211,7 +285,6 @@ export function BuildStage() {
                             editModeEnabled={editModeEnabled}
                             editTool={editTool}
                             selectedPaintValue={selectedPaintValue}
-                            hoveredRegionId={hoveredRegionId}
                             onActiveTabChange={setActiveTab}
                             onShowGridChange={setShowGrid}
                             onShowLabelsChange={setShowLabels}
@@ -219,7 +292,6 @@ export function BuildStage() {
                             onEditModeEnabledChange={setEditModeEnabled}
                             onEditToolChange={setEditTool}
                             onSelectedPaintValueChange={setSelectedPaintValue}
-                            onHoveredRegionIdChange={setHoveredRegionId}
                         />
                     </div>
                 </StudioPreview>
@@ -241,6 +313,13 @@ export function BuildStage() {
                         Assembly Mode: {activeTab === 'finished' ? 'Visualization' : 'Build'}
                     </span>
                 </div>
+                {compositionLocked && (
+                    <div className="absolute top-12 right-12 px-3 py-1.5 bg-emerald-50/90 backdrop-blur-md rounded-full border border-emerald-200 pointer-events-none">
+                        <span className="text-[10px] font-bold uppercase tracking-widest text-emerald-700">
+                            Composition Locked
+                        </span>
+                    </div>
+                )}
             </div>
         </div>
     )

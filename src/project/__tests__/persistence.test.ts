@@ -24,6 +24,7 @@ describe('project persistence format', () => {
         hoop: { presetId: 'round-150', label: 'Round 150mm', shape: 'round', widthMm: 150, heightMm: 150, marginMm: 10 },
       },
       referencePlacement: null,
+      compositionLocked: true,
       processingConfig: {
         colorCount: 16,
         ditherMode: 'none',
@@ -45,13 +46,64 @@ describe('project persistence format', () => {
       selection: null,
       manualEdits: [{ x: 1, y: 1, mode: 'fabric' }],
       manualEditTool: 'fabric',
+      buildDoneRegionIds: [1, 3, 9],
+      buildDoneRegionHash: 'abc123',
     })
 
     const parsed = parseAndMigrateProjectFile(stringifyProjectFile(project))
     expect(parsed.version).toBe(1)
     expect(parsed.createdAt).toBeTruthy()
+    expect(parsed.compositionLocked).toBe(true)
     expect(parsed.manualEdits).toEqual(project.manualEdits)
     expect(parsed.manualEditTool).toBe('fabric')
+    expect(parsed.buildDoneRegionIds).toEqual([1, 3, 9])
+    expect(parsed.buildDoneRegionHash).toBe('abc123')
+  })
+
+  it('infers composition lock for legacy Build/Export projects missing the field', () => {
+    const parsed = migrateProjectFile({
+      version: 1,
+      workflowStage: 'Build',
+      sourceImage: {
+        mime: 'image/png',
+        width: 8,
+        height: 8,
+        dataBase64: 'AA==',
+      },
+      fabricSetup: {
+        type: 'linen',
+        textureIntensity: 0.5,
+        count: 14,
+        color: { r: 245, g: 245, b: 220 },
+        hoop: { presetId: 'round-150', label: 'Round 150mm', shape: 'round', widthMm: 150, heightMm: 150, marginMm: 10 },
+      },
+      referencePlacement: null,
+      processingConfig: {
+        colorCount: 16,
+        ditherMode: 'none',
+        targetSize: 256,
+        selectionWorkingSize: 1024,
+        selectionMaxMegapixels: 2,
+        useDmcPalette: true,
+        smoothingAmount: 0.2,
+        simplifyAmount: 0.1,
+        minRegionSize: 2,
+        fabricColor: { r: 245, g: 245, b: 220 },
+        stitchThreshold: 0.1,
+        organicPreview: false,
+      },
+      maskConfig: {
+        brushSize: 20,
+        opacity: 0.5,
+      },
+      selection: null,
+      manualEdits: [],
+      manualEditTool: 'paint',
+      buildDoneRegionIds: [2],
+      buildDoneRegionHash: 'lock-hash',
+    })
+
+    expect(parsed.compositionLocked).toBe(true)
   })
 
   it('fails on unsupported version (migration stub)', () => {

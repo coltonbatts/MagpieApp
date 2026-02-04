@@ -1,11 +1,24 @@
+import { useEffect, useMemo, useRef } from 'react'
 import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
 import { Panel } from './ui'
 
-export function Legend() {
-  const { pattern, processingConfig } = usePatternStore()
+interface LegendProps {
+  mode?: 'default' | 'build'
+}
+
+export function Legend({ mode = 'default' }: LegendProps) {
+  const {
+    pattern,
+    processingConfig,
+    buildArtifact,
+    activeRegionId,
+    doneRegionIds,
+    setActiveRegionId,
+  } = usePatternStore()
   const { highlightColorKey, setHighlightColorKey } = useUIStore()
   const isDev = import.meta.env.DEV
+  const rowRefByColor = useRef(new Map<string, HTMLDivElement>())
 
   if (!pattern) {
     return (
@@ -15,12 +28,32 @@ export function Legend() {
     )
   }
 
+  const doneSet = useMemo(() => new Set(doneRegionIds), [doneRegionIds])
+  const regionIdsByColorKey = useMemo(() => {
+    const map = new Map<string, number[]>()
+    if (!buildArtifact) return map
+    for (const ids of buildArtifact.regionsByColor) {
+      if (!ids || ids.length === 0) continue
+      const first = buildArtifact.regions[ids[0] - 1]
+      if (!first) continue
+      map.set(first.colorKey, ids)
+    }
+    return map
+  }, [buildArtifact])
   const legend = pattern.getLegend({
     fabricConfig: {
       fabricColor: processingConfig.fabricColor,
       stitchThreshold: processingConfig.stitchThreshold,
     },
   })
+
+  useEffect(() => {
+    if (mode !== 'build' || !buildArtifact || !activeRegionId) return
+    const activeRegion = buildArtifact.regions.find((region) => region.id === activeRegionId)
+    if (!activeRegion) return
+    setHighlightColorKey(activeRegion.colorKey)
+    rowRefByColor.current.get(activeRegion.colorKey)?.scrollIntoView({ block: 'nearest' })
+  }, [activeRegionId, buildArtifact, mode, setHighlightColorKey])
 
   return (
     <Panel variant="inset" className="h-full">
@@ -36,16 +69,25 @@ export function Legend() {
       <div className="max-h-[calc(100vh-16rem)] overflow-y-auto pr-1">
         {legend.map((entry, index) => {
           const coveragePercent = (entry.coverage * 100).toFixed(1)
-          const colorKey = `${entry.dmcCode}|${entry.hex}`
+          const colorKey = `${entry.dmcCode.toUpperCase()}|${entry.hex.toUpperCase()}`
           const isHighlighted = highlightColorKey === colorKey
+          const regionIds = regionIdsByColorKey.get(colorKey) ?? []
+          const doneCount = regionIds.reduce((acc, id) => (doneSet.has(id) ? acc + 1 : acc), 0)
+
           return (
             <div
               key={`${entry.hex}-${entry.dmcCode}`}
-              onClick={() => {
-                if (isHighlighted) {
-                  setHighlightColorKey(null)
+              ref={(node) => {
+                if (node) {
+                  rowRefByColor.current.set(colorKey, node)
                 } else {
-                  setHighlightColorKey(colorKey)
+                  rowRefByColor.current.delete(colorKey)
+                }
+              }}
+              onClick={() => {
+                setHighlightColorKey(isHighlighted ? null : colorKey)
+                if (mode === 'build' && regionIds.length > 0) {
+                  setActiveRegionId(regionIds[0])
                 }
               }}
               className={[
@@ -71,6 +113,12 @@ export function Legend() {
                 {entry.isMappedToDmc && (
                   <div className="truncate text-xs text-fg-subtle">
                     {entry.hex}
+                  </div>
+                )}
+                {mode === 'build' && regionIds.length > 0 && (
+                  <div className="text-[11px] text-fg-subtle">
+                    {regionIds.length} regions
+                    {regionIds.length > 0 ? ` | ${Math.round((doneCount / regionIds.length) * 100)}% done` : ''}
                   </div>
                 )}
               </div>
