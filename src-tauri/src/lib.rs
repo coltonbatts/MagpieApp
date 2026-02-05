@@ -4,6 +4,7 @@ mod pdf_export;
 mod project_hub;
 mod regions;
 mod selection;
+mod stage4;
 
 use embroidery::{process_pattern, process_pattern_from_path, PatternResult, ProcessingConfig};
 use pdf_export::PdfExportPayload;
@@ -290,9 +291,10 @@ pub fn run() {
             let reload_item = MenuItemBuilder::with_id(MenuId::new(MENU_RELOAD), "Reload Window")
                 .accelerator("CmdOrCtrl+R")
                 .build(app)?;
-            let relaunch_item = MenuItemBuilder::with_id(MenuId::new(MENU_RELAUNCH), "Relaunch App")
-                .accelerator("CmdOrCtrl+Shift+R")
-                .build(app)?;
+            let relaunch_item =
+                MenuItemBuilder::with_id(MenuId::new(MENU_RELAUNCH), "Relaunch App")
+                    .accelerator("CmdOrCtrl+Shift+R")
+                    .build(app)?;
 
             let view_menu = SubmenuBuilder::new(app, "View")
                 .item(&reload_item)

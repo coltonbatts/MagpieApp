@@ -1,4 +1,5 @@
 use crate::embroidery::{process_pattern, ProcessingConfig};
+use crate::stage4::{build_stage4_regions, Stage4Config, Stage4Contract, Stage4Preset};
 use image::GenericImageView;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -7,7 +8,7 @@ use std::path::PathBuf;
 use std::time::Instant;
 use tauri::Manager;
 
-const PIPELINE_CACHE_VERSION: u8 = 6; // Bumped to invalidate old path offset parsing
+const PIPELINE_CACHE_VERSION: u8 = 8; // Bumped for Stage 4 contract + preset pipeline
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -33,6 +34,7 @@ pub enum HoopShape {
 pub struct RegionData {
     pub width: u32,
     pub height: u32,
+    pub stage4: Stage4Contract,
     pub regions: Vec<VectorRegion>,
     pub palette: Vec<String>,
     pub perf: PerfStats,
@@ -105,10 +107,8 @@ pub fn process_image_pipeline(
         return Err("Image too small. Minimum size is 2x2.".to_string());
     }
     let decode_ms = decode_start.elapsed().as_millis() as u64;
-    
-    // Store original dimensions for consistent coordinate space
-    // The pattern processing may create a different size grid, but the SVG paths
-    // from vtracer should be interpreted in the original image's coordinate space.
+
+    // Store original dimensions for consistent coordinate space.
     let original_width = width;
     let original_height = height;
 
@@ -119,7 +119,7 @@ pub fn process_image_pipeline(
     let y_radius = x_radius;
     let filtered = imageproc::filter::median_filter(&image_buffer, x_radius, y_radius);
     image_buffer = filtered;
-    
+
     // Convert back to raw bytes for pattern processing
     let mut image_data_filtered = Vec::new();
     let mut cursor = std::io::Cursor::new(&mut image_data_filtered);
@@ -137,7 +137,7 @@ pub fn process_image_pipeline(
     };
     let config = ProcessingConfig {
         color_count: color_count as u32,
-        use_dmc_palette: true, 
+        use_dmc_palette: true,
         smoothing_amount: 0.4 + (1.0 - detail_level) * 0.4,
         simplify_amount: 0.2 + (1.0 - detail_level) * 0.5,
         min_region_size,
@@ -147,82 +147,52 @@ pub fn process_image_pipeline(
     let pattern = process_pattern(&image_data_filtered, &config, Some(&hoop_mask))?;
     let quantize_ms = quantize_start.elapsed().as_millis() as u64;
 
-    let tracer_start = Instant::now();
-    
-    // Create a color-indexed buffer for vtracer
-    let mut indexed_buffer = image::ImageBuffer::<image::Luma<u16>, Vec<u16>>::new(width, height);
-    for stitch in &pattern.stitches {
-        let label = pattern.palette.iter().position(|hex| hex == &stitch.hex).unwrap_or(0);
-        indexed_buffer.put_pixel(stitch.x, stitch.y, image::Luma([label as u16]));
+    let contour_start = Instant::now();
+    let stage4_preset = stage4_preset_from_detail(detail_level);
+    let stage4_config = Stage4Config::from_preset(
+        stage4_preset,
+        color_count as usize,
+        min_region_size as usize,
+    );
+    let stage4 = build_stage4_regions(&pattern, &stage4_config, stage4_preset)?;
+    if let Some(reason) = &stage4.fallback_reason {
+        log::warn!("Stage 4 deterministic fallback: {:?}", reason);
     }
+    let regions = stage4
+        .regions
+        .into_iter()
+        .map(|region| VectorRegion {
+            region_id: region.region_id,
+            color: RegionColor {
+                rgb: region.color.rgb,
+                hex: region.color.hex,
+                dmc_code: region.color.dmc_code,
+                dmc_name: region.color.dmc_name,
+            },
+            area_px: region.area_px,
+            path_svg: region.path_svg,
+            path_offset_x: region.path_offset_x,
+            path_offset_y: region.path_offset_y,
+            holes_svg: region.holes_svg,
+            bbox: RegionBounds {
+                x: region.bbox.x,
+                y: region.bbox.y,
+                w: region.bbox.w,
+                h: region.bbox.h,
+            },
+            centroid_x: region.centroid_x,
+            centroid_y: region.centroid_y,
+        })
+        .collect::<Vec<_>>();
 
-    // Use vtracer for professional curve extraction
-    use vtracer::{Config, ColorMode, Hierarchical};
-    
-    // Create a color-indexed buffer for vtracer
-    // However, since we already have the clusters from our DMC-aware k-means, 
-    // we should ideally feed it the quantized image.
-    let mut quantized_img = image::ImageBuffer::<image::Rgba<u8>, Vec<u8>>::new(width, height);
-    for stitch in &pattern.stitches {
-        let rgb = hex_to_rgb(&stitch.hex).unwrap_or([0, 0, 0]);
-        quantized_img.put_pixel(stitch.x, stitch.y, image::Rgba([rgb[0], rgb[1], rgb[2], 255]));
-    }
-
-    let pixels = quantized_img.into_raw();
-
-    let v_img = visioncortex::ColorImage {
-        pixels,
-        width: width as usize,
-        height: height as usize,
-    };
-
-    let v_config = Config {
-        color_mode: ColorMode::Color,
-        hierarchical: Hierarchical::Stacked,
-        filter_speckle: min_region_size as usize,
-        color_precision: 8,
-        layer_difference: 0,
-        mode: visioncortex::PathSimplifyMode::Spline,
-        corner_threshold: 60,
-        length_threshold: 4.0,
-        max_iterations: 10,
-        splice_threshold: 45,
-        path_precision: Some(2),
-    };
-
-    // vtracer::convert returns Result<SvgFile, String>
-    let svg_obj = vtracer::convert(v_img, v_config).map_err(|e| format!("VTracer error: {}", e))?;
-    let svg_str = svg_obj.to_string();
-    
-    // DEBUG: Log VTracer output to understand coordinate space
-    eprintln!("\n========== VTRACER DEBUG ==========");
-    eprintln!("[image_processor] VTracer SVG (first 800 chars):\n{}", &svg_str[..svg_str.len().min(800)]);
-    eprintln!("[image_processor] Input image dimensions: {}x{}", width, height);
-    eprintln!("[image_processor] Returning dimensions to frontend: {}x{}", original_width, original_height);
-    eprintln!("[image_processor] Pattern dimensions (quantized): {}x{}", pattern.width, pattern.height);
-    eprintln!("===================================\n");
-    
-    let regions = parse_v_svg_to_regions(&svg_str, &pattern, original_width, original_height);
-    
-    // DEBUG: Log first region details
-    if let Some(first_region) = regions.first() {
-        eprintln!("[image_processor] First region bbox: x={}, y={}, w={}, h={}", 
-            first_region.bbox.x, first_region.bbox.y, first_region.bbox.w, first_region.bbox.h);
-        eprintln!(
-            "[image_processor] First region path offset: x={}, y={}",
-            first_region.path_offset_x, first_region.path_offset_y
-        );
-        eprintln!("[image_processor] First region path (first 200 chars): {}", &first_region.path_svg[..first_region.path_svg.len().min(200)]);
-    }
-
-
-    let tracer_ms = tracer_start.elapsed().as_millis() as u64;
+    let tracer_ms = contour_start.elapsed().as_millis() as u64;
     let total_ms = total_start.elapsed().as_millis() as u64;
 
     let result = RegionData {
         // Use original dimensions to maintain coordinate space consistency with frontend
         width: original_width,
         height: original_height,
+        stage4: stage4.contract,
         regions,
         palette: pattern.palette,
         perf: PerfStats {
@@ -236,118 +206,6 @@ pub fn process_image_pipeline(
 
     write_cache(app, &cache_key, &result)?;
     Ok(result)
-}
-
-fn parse_v_svg_to_regions(
-    svg: &str,
-    pattern: &crate::embroidery::PatternResult,
-    img_width: u32,
-    img_height: u32,
-) -> Vec<VectorRegion> {
-    use regex::Regex;
-
-    let path_tag_re = Regex::new(r#"<path\s+[^>]*?>"#).unwrap();
-    let attr_re = Regex::new(r#"([a-zA-Z_:][\w:.-]*)="([^"]*)""#).unwrap();
-    let mut regions = Vec::new();
-    let mut id_counter = 0;
-
-    for path_tag in path_tag_re.find_iter(svg) {
-        let tag = path_tag.as_str();
-        let mut fill = None::<String>;
-        let mut path_d = None::<String>;
-        let mut transform = None::<String>;
-
-        for attr_cap in attr_re.captures_iter(tag) {
-            let key = attr_cap
-                .get(1)
-                .map(|m| m.as_str())
-                .unwrap_or_default()
-                .to_ascii_lowercase();
-            let value = attr_cap
-                .get(2)
-                .map(|m| m.as_str().to_string())
-                .unwrap_or_default();
-            match key.as_str() {
-                "fill" => fill = Some(value),
-                "d" => path_d = Some(value),
-                "transform" => transform = Some(value),
-                _ => {}
-            }
-        }
-
-        if let (Some(mut fill), Some(d)) = (fill, path_d) {
-            // Normalize hex color for matching
-            if !fill.starts_with('#') && fill.len() == 6 {
-                fill = format!("#{}", fill);
-            }
-            let hex = fill.to_uppercase();
-            let current_rgb = hex_to_rgb(&hex).unwrap_or([0, 0, 0]);
-            let (path_offset_x, path_offset_y) =
-                parse_translate_transform(transform.as_deref()).unwrap_or((0.0, 0.0));
-            
-            // Find matching DMC from pattern - first try exact match
-            let mut dmc_match = pattern.color_mappings.iter().find(|m| {
-                m.mapped_hex.to_uppercase() == hex || 
-                m.original_hex.to_uppercase() == hex ||
-                m.mapped_hex.trim_start_matches('#').to_uppercase() == hex.trim_start_matches('#') ||
-                m.original_hex.trim_start_matches('#').to_uppercase() == hex.trim_start_matches('#')
-            });
-
-            // Fallback: Fuzzy match if exact match fails (vtracer can drift colors slightly)
-            if dmc_match.is_none() {
-                dmc_match = pattern.color_mappings.iter().min_by_key(|m| {
-                    let m_rgb = hex_to_rgb(&m.mapped_hex).unwrap_or([0, 0, 0]);
-                    let dr = (m_rgb[0] as i32 - current_rgb[0] as i32).pow(2);
-                    let dg = (m_rgb[1] as i32 - current_rgb[1] as i32).pow(2);
-                    let db = (m_rgb[2] as i32 - current_rgb[2] as i32).pow(2);
-                    dr + dg + db
-                });
-            }
-            
-            if let Some(m) = dmc_match {
-                id_counter += 1;
-                regions.push(VectorRegion {
-                    region_id: format!("v_{}", id_counter),
-                    color: RegionColor {
-                        rgb: hex_to_rgb(&m.mapped_hex).unwrap_or([0, 0, 0]),
-                        hex: m.mapped_hex.clone(), // Use the official mapped DMC hex
-                        dmc_code: Some(m.dmc.code.clone()),
-                        dmc_name: Some(m.dmc.name.clone()),
-                    },
-                    area_px: 1, // Minimal area to ensure legend displays
-                    path_svg: d,
-                    path_offset_x,
-                    path_offset_y,
-                    holes_svg: Vec::new(), 
-                    bbox: RegionBounds { x: 0.0, y: 0.0, w: img_width as f32, h: img_height as f32 },
-                    centroid_x: 0.0,
-                    centroid_y: 0.0,
-                });
-            }
-        }
-    }
-    
-    regions
-}
-
-fn parse_translate_transform(transform: Option<&str>) -> Option<(f32, f32)> {
-    let transform = transform?;
-    let translate_start = transform.find("translate(")?;
-    let value_start = translate_start + "translate(".len();
-    let value_end = transform[value_start..].find(')')? + value_start;
-    let values = &transform[value_start..value_end];
-
-    let mut parts = values
-        .split(|c: char| c == ',' || c.is_ascii_whitespace())
-        .filter(|s| !s.is_empty());
-
-    let x = parts.next()?.parse::<f32>().ok()?;
-    let y = parts
-        .next()
-        .and_then(|v| v.parse::<f32>().ok())
-        .unwrap_or(0.0);
-
-    Some((x, y))
 }
 
 fn build_cache_key(
@@ -372,6 +230,16 @@ fn build_cache_key(
         HoopShape::Oval => 2,
     }]);
     format!("{:x}", hasher.finalize())
+}
+
+fn stage4_preset_from_detail(detail_level: f32) -> Stage4Preset {
+    if detail_level < 0.33 {
+        Stage4Preset::Draft
+    } else if detail_level < 0.78 {
+        Stage4Preset::Standard
+    } else {
+        Stage4Preset::HighDetail
+    }
 }
 
 fn build_hoop_mask(width: u32, height: u32, hoop: &HoopConfig) -> Vec<u8> {
@@ -432,15 +300,4 @@ fn write_cache(app: &tauri::AppHandle, key: &str, data: &RegionData) -> Result<(
     let payload = serde_json::to_vec(data)
         .map_err(|e| format!("Failed to serialize cache payload: {}", e))?;
     fs::write(path, payload).map_err(|e| format!("Failed to write cache file: {}", e))
-}
-
-fn hex_to_rgb(hex: &str) -> Option<[u8; 3]> {
-    let trimmed = hex.trim_start_matches('#');
-    if trimmed.len() != 6 {
-        return None;
-    }
-    let r = u8::from_str_radix(&trimmed[0..2], 16).ok()?;
-    let g = u8::from_str_radix(&trimmed[2..4], 16).ok()?;
-    let b = u8::from_str_radix(&trimmed[4..6], 16).ok()?;
-    Some([r, g, b])
 }
