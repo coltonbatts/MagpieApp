@@ -2,11 +2,20 @@ import { useState } from 'react'
 import { usePatternStore } from '@/store/pattern-store'
 import { useUIStore } from '@/store/ui-store'
 import { PatternViewer } from '@/viewer/PatternViewer'
+import { ColoringBookViewer } from '@/viewer/ColoringBookViewer'
 import { ExportMenu } from '../ExportMenu'
 import { Button, SegmentedControl } from '@/components/ui'
 
 export function ExportStage() {
-    const { pattern, compositionLocked } = usePatternStore()
+    const {
+        pattern,
+        coloringBookData,
+        fabricSetup,
+        compositionLocked,
+        coloringBookLineWeight,
+        coloringBookSaturation,
+        coloringBookOutlineIntensity
+    } = usePatternStore()
     const { setWorkflowStage } = useUIStore()
 
     const [activeTab, setActiveTab] = useState<'finished' | 'pattern'>('finished')
@@ -79,14 +88,25 @@ export function ExportStage() {
             {/* Main View: Large Pattern Preview */}
             <div className="flex-1 bg-surface-2 relative flex items-center justify-center p-8 overflow-hidden">
                 <div className="w-full h-full rounded-2xl border border-border bg-white shadow-2xl overflow-hidden relative group">
-                    <PatternViewer
-                        pattern={pattern}
-                        activeTab={activeTab}
-                        showGrid={false}
-                        showLabels={true}
-                        showOutlines={true}
-                        onActiveTabChange={setActiveTab}
-                    />
+                    {activeTab === 'finished' && coloringBookData ? (
+                        <ColoringBookViewer
+                            data={coloringBookData}
+                            hoop={fabricSetup.hoop}
+                            saturation={coloringBookSaturation}
+                            outlineIntensity={coloringBookOutlineIntensity}
+                            lineWeight={coloringBookLineWeight}
+                            activeDmcCode={null}
+                        />
+                    ) : (
+                        <PatternViewer
+                            pattern={pattern}
+                            activeTab={activeTab}
+                            showGrid={false}
+                            showLabels={true}
+                            showOutlines={true}
+                            onActiveTabChange={setActiveTab}
+                        />
+                    )}
 
                     {/* Floating HUD */}
                     <div className="absolute top-6 right-6 pointer-events-none">

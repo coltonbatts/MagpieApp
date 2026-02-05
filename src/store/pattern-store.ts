@@ -55,6 +55,7 @@ export interface PatternState {
   manualEditTool: 'paint' | 'fabric'
   processingConfig: ProcessingConfig
   isProcessing: boolean
+  activeDmcCode: string | null
   error: string | null
   setOriginalImage: (image: ImageBitmap) => void
   setSourceImages: (buildImage: ImageData, selectionImage: ImageData) => void
@@ -85,6 +86,7 @@ export interface PatternState {
   setManualEditTool: (tool: 'paint' | 'fabric') => void
   setProcessingConfig: (config: Partial<ProcessingConfig>) => void
   setIsProcessing: (isProcessing: boolean) => void
+  setActiveDmcCode: (code: string | null) => void
   setError: (error: string | null) => void
   reset: () => void
 }
@@ -157,6 +159,7 @@ export const usePatternStore = create<PatternState>((set) => ({
     organicPreview: false,
   },
   isProcessing: false,
+  activeDmcCode: null,
   error: null,
   setOriginalImage: (image) =>
     set((state) => {
@@ -358,6 +361,7 @@ export const usePatternStore = create<PatternState>((set) => ({
       processingConfig: { ...state.processingConfig, ...config },
     })),
   setIsProcessing: (isProcessing) => set({ isProcessing }),
+  setActiveDmcCode: (activeDmcCode) => set({ activeDmcCode }),
   setError: (error) => set({ error }),
   reset: () =>
     set((state) => {
@@ -389,6 +393,7 @@ export const usePatternStore = create<PatternState>((set) => ({
         manualEdits: {},
         manualEditTool: 'paint',
         isProcessing: false,
+        activeDmcCode: null,
         error: null,
       }
     }),

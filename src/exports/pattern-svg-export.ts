@@ -9,6 +9,7 @@ export function generatePatternSVG(pattern: Pattern, config: ProcessingConfig): 
     }
 
     const { labels, paletteHex, width, height } = pattern
+    const legend = pattern.getLegend({ fabricConfig: config })
 
     // 1. Identify fabric indices
     const fabricLabels = new Set<number>()
@@ -34,25 +35,43 @@ export function generatePatternSVG(pattern: Pattern, config: ProcessingConfig): 
         manualMask: pattern.selection?.mask
     })
 
-    // 4. Build SVG
+    // 4. Group paths by DMC
+    const pathsByDmc = new Map<string, Path[]>()
+    paths.forEach(path => {
+        if (path.isFabric) return
+        // path.label is the index into palette. 
+        const code = legend[path.label]?.dmcCode ?? `Color ${path.label + 1}`
+        const existing = pathsByDmc.get(code) || []
+        existing.push(path)
+        pathsByDmc.set(code, existing)
+    })
+
+    // 5. Build SVG
     const svgLines: string[] = []
     svgLines.push(`<svg viewBox="0 0 ${width} ${height}" xmlns="http://www.w3.org/2000/svg">`)
+    svgLines.push(`  <desc>Magpie DMC-Forward Layered Export</desc>`)
 
     // Outer border
-    svgLines.push(`  <rect x="0" y="0" width="${width}" height="${height}" fill="none" stroke="#ccc" stroke-width="0.5" />`)
+    svgLines.push(`  <rect x="0" y="0" width="${width}" height="${height}" fill="none" stroke="#eee" stroke-width="0.5" />`)
 
-    paths.forEach((path: Path) => {
-        if (path.isFabric) return // Skip outlining fabric regions
+    pathsByDmc.forEach((dmcPaths, code) => {
+        const pathLabel = dmcPaths[0].label
+        const hex = paletteHex[pathLabel] ?? '#000000'
+        svgLines.push(`  <g id="dmc-${code.replace(/\s+/g, '-')}" data-dmc="${code}">`)
 
-        const d = path.points.map((p: Point, j: number) => `${j === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ') + ' Z'
-        svgLines.push(`  <path d="${d}" fill="none" stroke="black" stroke-width="0.2" />`)
+        dmcPaths.forEach((path: Path) => {
+            const d = path.points.map((p: Point, j: number) => `${j === 0 ? 'M' : 'L'} ${p.x.toFixed(2)} ${p.y.toFixed(2)}`).join(' ') + ' Z'
+            // Use filled shapes for "paint-by-number" feel
+            svgLines.push(`    <path d="${d}" fill="${hex}" stroke="${hex}" stroke-width="0.1" opacity="0.8" />`)
 
-        // Label placement
-        if (path.points.length > 5) {
-            const center = getBoundingBoxCenter(path.points)
-            // Only label if it's likely inside (this is a heuristic, real max-inscribed-circle would be better)
-            svgLines.push(`  <text x="${center.x.toFixed(2)}" y="${center.y.toFixed(2)}" font-family="Arial" font-size="1.5" text-anchor="middle" alignment-baseline="middle" fill="black">${path.label + 1}</text>`)
-        }
+            // Centered DMC Label
+            if (path.points.length > 8) {
+                const center = getBoundingBoxCenter(path.points)
+                svgLines.push(`    <text x="${center.x.toFixed(2)}" y="${center.y.toFixed(2)}" font-family="monospace" font-weight="black" font-size="2" text-anchor="middle" alignment-baseline="middle" fill="white" style="text-shadow: 0 0 2px black;">${code}</text>`)
+            }
+        })
+
+        svgLines.push(`  </g>`)
     })
 
     svgLines.push('</svg>')

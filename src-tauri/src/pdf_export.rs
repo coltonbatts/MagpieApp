@@ -65,7 +65,7 @@ pub fn export_pattern_pdf(payload: &PdfExportPayload) -> Result<Vec<u8>, String>
         return Err("Pattern dimensions must be greater than 0.".to_string());
     }
 
-    let mode = payload.mode.unwrap_or(PdfExportMode::Blueprint);
+    let mode = payload.mode.unwrap_or(PdfExportMode::Outline); // Default to Outline for DMC-Forward
     match mode {
         PdfExportMode::Blueprint => export_blueprint_pdf(payload),
         PdfExportMode::Outline => export_outline_pdf(payload),

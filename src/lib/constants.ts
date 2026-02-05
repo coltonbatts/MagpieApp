@@ -19,8 +19,8 @@ export const PROCESSING = {
 
 export const VIEWER = {
   CELL_SIZE: 20,
-  MIN_ZOOM: 0.1,
-  MAX_ZOOM: 10,
+  MIN_ZOOM: 0.01,
+  MAX_ZOOM: 50,
   DEFAULT_ZOOM: 1,
 } as const
 

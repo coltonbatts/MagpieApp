@@ -25,9 +25,13 @@ tauri = { version = "2.10.0", features = [] }
 tauri-plugin-log = "2"
 rfd = "0.15"
 opener = "0.8"
+regex = "1.10"
 
 # Image processing
 image = "0.25"
+imageproc = "0.25"
+vtracer = "0.6"
+visioncortex = "0.8"
 rayon = "1.10"
 sha2 = "0.10"
 

@@ -30,6 +30,8 @@ export function BuildStage() {
     setColoringBookSaturation,
     setColoringBookOutlineIntensity,
     isProcessing,
+    activeDmcCode,
+    setActiveDmcCode,
   } = usePatternStore()
 
   const { setWorkflowStage, viewerCamera } = useUIStore()
@@ -82,16 +84,17 @@ export function BuildStage() {
   const threadLegend = useMemo(() => {
     if (!coloringBookData) return []
 
-    const byKey = new Map<string, { hex: string; dmc: string; area: number }>()
+    const byKey = new Map<string, { hex: string; dmc: string; name: string; area: number }>()
     for (const region of coloringBookData.regions) {
       const hex = region.color.hex.toUpperCase()
       const dmc = (region.color.dmcCode ?? hex).toUpperCase()
-      const key = `${dmc}|${hex}`
+      const name = region.color.dmcName ?? 'Custom Color'
+      const key = dmc // Use DMC for isolation
       const existing = byKey.get(key)
       if (existing) {
         existing.area += region.areaPx
       } else {
-        byKey.set(key, { hex, dmc, area: region.areaPx })
+        byKey.set(key, { hex, dmc, name, area: region.areaPx })
       }
     }
 
@@ -186,21 +189,53 @@ export function BuildStage() {
               )}
             </section>
 
-            <section className="space-y-3 border-t border-border/50 pt-6 pb-4">
-              <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-fg-subtle">Thread Legend</h3>
-              <div className="max-h-80 overflow-y-auto rounded-xl border border-border/70 bg-surface-2">
+            <section className="space-y-4 border-t border-border/50 pt-6 pb-4">
+              <div className="flex items-center justify-between">
+                <h3 className="text-[10px] font-bold uppercase tracking-[0.2em] text-fg-subtle">Paint-by-Number Legend</h3>
+                {activeDmcCode && (
+                  <button
+                    onClick={() => setActiveDmcCode(null)}
+                    className="text-[9px] font-black uppercase text-accent hover:underline"
+                  >
+                    Clear Focus
+                  </button>
+                )}
+              </div>
+              <div className="grid grid-cols-1 gap-2">
                 {threadLegend.length === 0 ? (
-                  <p className="px-3 py-3 text-xs text-fg-subtle">Generate preview to see thread legend.</p>
+                  <p className="px-3 py-3 text-xs text-fg-subtle italic text-center">Generate preview to see legend.</p>
                 ) : (
-                  threadLegend.map((entry) => (
-                    <div key={`${entry.dmc}|${entry.hex}`} className="flex items-center justify-between border-b border-border/60 px-3 py-2 text-xs last:border-b-0">
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="h-4 w-4 rounded border border-border" style={{ backgroundColor: entry.hex }} />
-                        <span className="truncate font-mono text-fg">{entry.dmc}</span>
-                      </div>
-                      <span className="text-fg-muted">{entry.hex}</span>
-                    </div>
-                  ))
+                  threadLegend.map((entry) => {
+                    const isIsolated = activeDmcCode === entry.dmc
+                    return (
+                      <button
+                        key={`${entry.dmc}|${entry.hex}`}
+                        onClick={() => setActiveDmcCode(isIsolated ? null : entry.dmc)}
+                        className={`flex items-center gap-4 px-3 py-2.5 rounded-xl border transition-all group ${isIsolated
+                          ? 'bg-fg text-surface border-fg shadow-lg scale-[1.02]'
+                          : 'bg-surface-2 border-border/60 hover:border-border-strong text-fg'
+                          }`}
+                      >
+                        <div
+                          className="h-10 w-10 rounded-full border border-black/10 shadow-inner shrink-0"
+                          style={{ backgroundColor: entry.hex }}
+                        />
+                        <div className="flex flex-col items-start min-w-0 flex-1">
+                          <span className={`text-xl font-black leading-tight tracking-tighter ${isIsolated ? 'text-surface' : 'text-fg'}`}>
+                            {entry.dmc}
+                          </span>
+                          <span className={`text-[10px] uppercase font-bold tracking-widest opacity-80 truncate w-full text-left ${isIsolated ? 'text-surface' : 'text-fg-subtle'}`}>
+                            {entry.name}
+                          </span>
+                        </div>
+                        {isIsolated && (
+                          <div className="text-[10px] font-black uppercase tracking-widest text-accent-soft animate-pulse">
+                            Focused
+                          </div>
+                        )}
+                      </button>
+                    )
+                  })
                 )}
               </div>
             </section>
@@ -241,6 +276,7 @@ export function BuildStage() {
             lineWeight={coloringBookLineWeight}
             saturation={coloringBookSaturation}
             outlineIntensity={coloringBookOutlineIntensity}
+            activeDmcCode={activeDmcCode}
           />
           {!coloringBookData && coloringBookStatus !== 'error' && (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-fg-muted">

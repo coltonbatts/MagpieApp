@@ -228,6 +228,7 @@ export interface ColoringBookRegionColor {
   rgb: [number, number, number]
   hex: string
   dmcCode: string | null
+  dmcName?: string | null
 }
 
 export interface ColoringBookRegionBounds {

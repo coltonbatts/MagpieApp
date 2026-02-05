@@ -10,6 +10,7 @@ interface ColoringBookViewerProps {
   lineWeight: number
   saturation: number
   outlineIntensity: number
+  activeDmcCode: string | null
 }
 
 interface ParsedPath {
@@ -22,6 +23,7 @@ export function ColoringBookViewer({
   lineWeight,
   saturation,
   outlineIntensity,
+  activeDmcCode,
 }: ColoringBookViewerProps) {
   const viewerCamera = useUIStore((state) => state.viewerCamera)
   const setViewerCamera = useUIStore((state) => state.setViewerCamera)
@@ -191,6 +193,21 @@ export function ColoringBookViewer({
       })
       outline.stroke()
       content.addChild(outline)
+
+      // Isolation logic
+      if (activeDmcCode) {
+        const isIsolated = region.color.dmcCode === activeDmcCode
+        if (isIsolated) {
+          fill.alpha = 1.0
+          outline.alpha = 1.0
+        } else {
+          fill.alpha = 0.1
+          outline.alpha = 0.05
+        }
+      } else {
+        fill.alpha = 1.0
+        outline.alpha = 0.95
+      }
     }
 
     const maskShape = new PIXI.Graphics()
@@ -202,12 +219,17 @@ export function ColoringBookViewer({
     drawHoopGuide(hoopGuide, data.width, data.height, hoop)
     world.addChild(hoopGuide)
 
-    if (worldSizeChanged && cameraRef.current.isFitted) {
-      fitCamera(false)
+    if (worldSizeChanged) {
+      // Only auto-fit if we don't have a valid camera yet
+      if (cameraRef.current.zoom <= 0.001 || cameraRef.current.isFitted) {
+        fitCamera(false)
+      } else {
+        applyCamera(cameraRef.current)
+      }
     } else {
       applyCamera(cameraRef.current)
     }
-  }, [applyCamera, data, fitCamera, hoop, isReady, lineWeight, outlineIntensity, parsedRegions, saturation, viewerCamera.zoom])
+  }, [applyCamera, data, fitCamera, hoop, isReady, lineWeight, outlineIntensity, parsedRegions, saturation, viewerCamera.zoom, activeDmcCode])
 
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return

@@ -687,7 +687,7 @@ pub fn process_pattern(
     }
 
     // Run k-means quantization
-    let k = config.color_count as usize;
+    let k = (config.color_count as usize).min(30);
     let max_iterations =
         (10.0 + quality_bias * 10.0 + config.smoothing_amount.clamp(0.0, 1.0) * 4.0).round()
             as usize;
