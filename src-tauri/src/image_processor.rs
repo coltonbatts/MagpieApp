@@ -6,9 +6,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::time::Instant;
 use tauri::Manager;
-use crate::regions::{color_key, is_fabric_code};
 
-const PIPELINE_CACHE_VERSION: u8 = 4; // Force another invalidation
+const PIPELINE_CACHE_VERSION: u8 = 6; // Bumped to invalidate old path offset parsing
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,6 +55,8 @@ pub struct VectorRegion {
     pub color: RegionColor,
     pub area_px: usize,
     pub path_svg: String,
+    pub path_offset_x: f32,
+    pub path_offset_y: f32,
     pub holes_svg: Vec<String>,
     pub bbox: RegionBounds,
     pub centroid_x: f32,
@@ -104,6 +105,12 @@ pub fn process_image_pipeline(
         return Err("Image too small. Minimum size is 2x2.".to_string());
     }
     let decode_ms = decode_start.elapsed().as_millis() as u64;
+    
+    // Store original dimensions for consistent coordinate space
+    // The pattern processing may create a different size grid, but the SVG paths
+    // from vtracer should be interpreted in the original image's coordinate space.
+    let original_width = width;
+    let original_height = height;
 
     let pre_proc_start = Instant::now();
     // 1. Preprocessing: Median filter to kill "Lego" noise and dithering artifacts
@@ -187,14 +194,35 @@ pub fn process_image_pipeline(
     let svg_obj = vtracer::convert(v_img, v_config).map_err(|e| format!("VTracer error: {}", e))?;
     let svg_str = svg_obj.to_string();
     
-    let regions = parse_v_svg_to_regions(&svg_str, &pattern);
+    // DEBUG: Log VTracer output to understand coordinate space
+    eprintln!("\n========== VTRACER DEBUG ==========");
+    eprintln!("[image_processor] VTracer SVG (first 800 chars):\n{}", &svg_str[..svg_str.len().min(800)]);
+    eprintln!("[image_processor] Input image dimensions: {}x{}", width, height);
+    eprintln!("[image_processor] Returning dimensions to frontend: {}x{}", original_width, original_height);
+    eprintln!("[image_processor] Pattern dimensions (quantized): {}x{}", pattern.width, pattern.height);
+    eprintln!("===================================\n");
+    
+    let regions = parse_v_svg_to_regions(&svg_str, &pattern, original_width, original_height);
+    
+    // DEBUG: Log first region details
+    if let Some(first_region) = regions.first() {
+        eprintln!("[image_processor] First region bbox: x={}, y={}, w={}, h={}", 
+            first_region.bbox.x, first_region.bbox.y, first_region.bbox.w, first_region.bbox.h);
+        eprintln!(
+            "[image_processor] First region path offset: x={}, y={}",
+            first_region.path_offset_x, first_region.path_offset_y
+        );
+        eprintln!("[image_processor] First region path (first 200 chars): {}", &first_region.path_svg[..first_region.path_svg.len().min(200)]);
+    }
+
 
     let tracer_ms = tracer_start.elapsed().as_millis() as u64;
     let total_ms = total_start.elapsed().as_millis() as u64;
 
     let result = RegionData {
-        width: pattern.width,
-        height: pattern.height,
+        // Use original dimensions to maintain coordinate space consistency with frontend
+        width: original_width,
+        height: original_height,
         regions,
         palette: pattern.palette,
         perf: PerfStats {
@@ -210,34 +238,52 @@ pub fn process_image_pipeline(
     Ok(result)
 }
 
-fn parse_v_svg_to_regions(svg: &str, pattern: &crate::embroidery::PatternResult) -> Vec<VectorRegion> {
+fn parse_v_svg_to_regions(
+    svg: &str,
+    pattern: &crate::embroidery::PatternResult,
+    img_width: u32,
+    img_height: u32,
+) -> Vec<VectorRegion> {
     use regex::Regex;
-    
-    // Regex that handles fill/d in any order
-    let path_re = Regex::new(r#"(?x)
-        <path\s+[^>]*?
-        (?:
-            fill="(?P<f1>[^"]+)"[^>]*?d="(?P<d1>[^"]+)"
-            |
-            d="(?P<d2>[^"]+)"[^>]*?fill="(?P<f2>[^"]+)"
-        )
-        [^>]*?>
-    "#).unwrap();
-    
+
+    let path_tag_re = Regex::new(r#"<path\s+[^>]*?>"#).unwrap();
+    let attr_re = Regex::new(r#"([a-zA-Z_:][\w:.-]*)="([^"]*)""#).unwrap();
     let mut regions = Vec::new();
     let mut id_counter = 0;
 
-    for cap in path_re.captures_iter(svg) {
-        let raw_fill = cap.name("f1").or_else(|| cap.name("f2")).map(|m| m.as_str().to_string());
-        let path_d = cap.name("d1").or_else(|| cap.name("d2")).map(|m| m.as_str().to_string());
-        
-        if let (Some(mut fill), Some(d)) = (raw_fill, path_d) {
+    for path_tag in path_tag_re.find_iter(svg) {
+        let tag = path_tag.as_str();
+        let mut fill = None::<String>;
+        let mut path_d = None::<String>;
+        let mut transform = None::<String>;
+
+        for attr_cap in attr_re.captures_iter(tag) {
+            let key = attr_cap
+                .get(1)
+                .map(|m| m.as_str())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            let value = attr_cap
+                .get(2)
+                .map(|m| m.as_str().to_string())
+                .unwrap_or_default();
+            match key.as_str() {
+                "fill" => fill = Some(value),
+                "d" => path_d = Some(value),
+                "transform" => transform = Some(value),
+                _ => {}
+            }
+        }
+
+        if let (Some(mut fill), Some(d)) = (fill, path_d) {
             // Normalize hex color for matching
             if !fill.starts_with('#') && fill.len() == 6 {
                 fill = format!("#{}", fill);
             }
             let hex = fill.to_uppercase();
             let current_rgb = hex_to_rgb(&hex).unwrap_or([0, 0, 0]);
+            let (path_offset_x, path_offset_y) =
+                parse_translate_transform(transform.as_deref()).unwrap_or((0.0, 0.0));
             
             // Find matching DMC from pattern - first try exact match
             let mut dmc_match = pattern.color_mappings.iter().find(|m| {
@@ -270,8 +316,10 @@ fn parse_v_svg_to_regions(svg: &str, pattern: &crate::embroidery::PatternResult)
                     },
                     area_px: 1, // Minimal area to ensure legend displays
                     path_svg: d,
+                    path_offset_x,
+                    path_offset_y,
                     holes_svg: Vec::new(), 
-                    bbox: RegionBounds { x: 0.0, y: 0.0, w: pattern.width as f32, h: pattern.height as f32 },
+                    bbox: RegionBounds { x: 0.0, y: 0.0, w: img_width as f32, h: img_height as f32 },
                     centroid_x: 0.0,
                     centroid_y: 0.0,
                 });
@@ -280,6 +328,26 @@ fn parse_v_svg_to_regions(svg: &str, pattern: &crate::embroidery::PatternResult)
     }
     
     regions
+}
+
+fn parse_translate_transform(transform: Option<&str>) -> Option<(f32, f32)> {
+    let transform = transform?;
+    let translate_start = transform.find("translate(")?;
+    let value_start = translate_start + "translate(".len();
+    let value_end = transform[value_start..].find(')')? + value_start;
+    let values = &transform[value_start..value_end];
+
+    let mut parts = values
+        .split(|c: char| c == ',' || c.is_ascii_whitespace())
+        .filter(|s| !s.is_empty());
+
+    let x = parts.next()?.parse::<f32>().ok()?;
+    let y = parts
+        .next()
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(0.0);
+
+    Some((x, y))
 }
 
 fn build_cache_key(

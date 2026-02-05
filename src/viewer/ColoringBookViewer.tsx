@@ -2,11 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type * as PIXINamespace from 'pixi.js'
 import { useUIStore } from '@/store/ui-store'
 import { fitCameraToWorld, zoomAtCursor } from '@/lib/camera'
-import type { CameraState, ColoringBookData, HoopConfig } from '@/types'
+import type { CameraState, ColoringBookData, HoopConfig, ReferencePlacement } from '@/types'
 
 interface ColoringBookViewerProps {
   data: ColoringBookData | null
   hoop: HoopConfig
+  referencePlacement: ReferencePlacement | null
   lineWeight: number
   saturation: number
   outlineIntensity: number
@@ -20,6 +21,7 @@ interface ParsedPath {
 export function ColoringBookViewer({
   data,
   hoop,
+  referencePlacement,
   lineWeight,
   saturation,
   outlineIntensity,
@@ -148,20 +150,107 @@ export function ColoringBookViewer({
     const world = worldContainerRef.current
     world.removeChildren()
 
-    const worldSizeChanged =
-      worldSizeRef.current.width !== data.width || worldSizeRef.current.height !== data.height
-    worldSizeRef.current = { width: data.width, height: data.height }
+    // Fixed scale matching StudioPreview
+    const HOOP_SCALE = 2.5
+    const worldWidth = hoop.widthMm * HOOP_SCALE
+    const worldHeight = hoop.heightMm * HOOP_SCALE
 
+    const worldSizeChanged =
+      worldSizeRef.current.width !== worldWidth || worldSizeRef.current.height !== worldHeight
+    worldSizeRef.current = { width: worldWidth, height: worldHeight }
+
+    // 1. Background (White paper for the hoop area)
+    const paper = new PIXI.Graphics()
+    paper.rect(0, 0, worldWidth, worldHeight)
+    paper.fill(0xffffff)
+    world.addChild(paper)
+
+    // 2. Transformed Content Container
     const content = new PIXI.Container()
     world.addChild(content)
 
-    const paper = new PIXI.Graphics()
-    paper.roundRect(0, 0, data.width, data.height, 8)
-    paper.fill(0xffffff)
-    content.addChild(paper)
+    // Position and scale image to match ReferencePlacement
+    const placement = referencePlacement || { x: 0, y: 0, width: 1, height: 1 }
+    const targetW = worldWidth * placement.width
+    const targetH = worldHeight * placement.height
+    const targetX = worldWidth * placement.x
+    const targetY = worldHeight * placement.y
+
+    console.debug('[ColoringBookViewer] Content transformation:', {
+      dataWidth: data.width,
+      dataHeight: data.height,
+      worldWidth,
+      worldHeight,
+      placement,
+      targetW,
+      targetH,
+      targetX,
+      targetY,
+      scaleX: targetW / data.width,
+      scaleY: targetH / data.height,
+      camera: cameraRef.current,
+    })
+
+    let minX = Number.POSITIVE_INFINITY
+    let minY = Number.POSITIVE_INFINITY
+    let maxX = Number.NEGATIVE_INFINITY
+    let maxY = Number.NEGATIVE_INFINITY
+
+    for (const region of parsedRegions) {
+      const offsetX = region.pathOffsetX ?? 0
+      const offsetY = region.pathOffsetY ?? 0
+      for (const point of region.outer.points) {
+        const x = point.x + offsetX
+        const y = point.y + offsetY
+        if (x < minX) minX = x
+        if (y < minY) minY = y
+        if (x > maxX) maxX = x
+        if (y > maxY) maxY = y
+      }
+      for (const hole of region.holes) {
+        for (const point of hole.points) {
+          const x = point.x + offsetX
+          const y = point.y + offsetY
+          if (x < minX) minX = x
+          if (y < minY) minY = y
+          if (x > maxX) maxX = x
+          if (y > maxY) maxY = y
+        }
+      }
+    }
+
+    if (
+      import.meta.env.DEV &&
+      Number.isFinite(minX) &&
+      Number.isFinite(minY) &&
+      Number.isFinite(maxX) &&
+      Number.isFinite(maxY)
+    ) {
+      const scaleX = targetW / data.width
+      const scaleY = targetH / data.height
+      console.debug('[ColoringBookViewer] Bounds sanity:', {
+        expectedImageBounds: { minX: 0, minY: 0, maxX: data.width, maxY: data.height },
+        actualImageBounds: { minX, minY, maxX, maxY, width: maxX - minX, height: maxY - minY },
+        worldBoundsAfterPlacement: {
+          minX: targetX + minX * scaleX,
+          minY: targetY + minY * scaleY,
+          maxX: targetX + maxX * scaleX,
+          maxY: targetY + maxY * scaleY,
+        },
+      })
+    }
+
+    content.position.set(targetX, targetY)
+    content.scale.set(targetW / data.width, targetH / data.height)
 
     for (const region of parsedRegions) {
       const color = parseHexColor(applySaturation(region.color.hex, saturation))
+      const pathOffsetX = region.pathOffsetX ?? 0
+      const pathOffsetY = region.pathOffsetY ?? 0
+
+      const regionContainer = new PIXI.Container()
+      regionContainer.position.set(pathOffsetX, pathOffsetY)
+      content.addChild(regionContainer)
 
       const fill = new PIXI.Graphics()
       if (region.outer.points.length >= 3) {
@@ -175,7 +264,7 @@ export function ColoringBookViewer({
           fill.fill(0xffffff)
         }
       }
-      content.addChild(fill)
+      regionContainer.addChild(fill)
 
       const outline = new PIXI.Graphics()
       if (region.outer.points.length >= 3) {
@@ -186,13 +275,16 @@ export function ColoringBookViewer({
           outline.poly(hole.points)
         }
       }
+
+      // Total effective scale for the lines: camera zoom * image scaling factor
+      const totalScale = cameraRef.current.zoom * (targetW / data.width)
       outline.setStrokeStyle({
-        width: lineWeight / Math.max(cameraRef.current.zoom, 0.0001),
+        width: lineWeight / Math.max(totalScale, 0.0001),
         color: outlineColorFromIntensity(outlineIntensity),
         alpha: 0.95,
       })
       outline.stroke()
-      content.addChild(outline)
+      regionContainer.addChild(outline)
 
       // Isolation logic
       if (activeDmcCode) {
@@ -210,17 +302,17 @@ export function ColoringBookViewer({
       }
     }
 
+    // 3. Mask and Guide (Hoop relative)
     const maskShape = new PIXI.Graphics()
-    drawHoopMask(maskShape, data.width, data.height, hoop)
+    drawHoopMask(maskShape, worldWidth, worldHeight, hoop)
     world.addChild(maskShape)
     content.mask = maskShape
 
     const hoopGuide = new PIXI.Graphics()
-    drawHoopGuide(hoopGuide, data.width, data.height, hoop)
+    drawHoopGuide(hoopGuide, worldWidth, worldHeight, hoop)
     world.addChild(hoopGuide)
 
     if (worldSizeChanged) {
-      // Only auto-fit if we don't have a valid camera yet
       if (cameraRef.current.zoom <= 0.001 || cameraRef.current.isFitted) {
         fitCamera(false)
       } else {
@@ -229,7 +321,7 @@ export function ColoringBookViewer({
     } else {
       applyCamera(cameraRef.current)
     }
-  }, [applyCamera, data, fitCamera, hoop, isReady, lineWeight, outlineIntensity, parsedRegions, saturation, viewerCamera.zoom, activeDmcCode])
+  }, [applyCamera, data, fitCamera, hoop, isReady, lineWeight, outlineIntensity, parsedRegions, saturation, viewerCamera.zoom, activeDmcCode, referencePlacement])
 
   const handlePointerDown = useCallback((event: React.PointerEvent<HTMLDivElement>) => {
     if (event.button !== 0) return
@@ -316,7 +408,7 @@ export function ColoringBookViewer({
 }
 
 function parseSimpleSvgPath(path: string): ParsedPath {
-  const tokens = path.match(/[MLCZ]|-?\d+(?:\.\d+)?/g) ?? []
+  const tokens = path.match(/[MLCZ]|-?(?:\d+\.?\d*|\.\d+)/g) ?? []
   const points: Array<{ x: number; y: number }> = []
 
   let startPoint: { x: number; y: number } | null = null

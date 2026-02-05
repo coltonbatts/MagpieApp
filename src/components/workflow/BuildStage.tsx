@@ -34,13 +34,25 @@ export function BuildStage() {
     setActiveDmcCode,
   } = usePatternStore()
 
-  const { setWorkflowStage, viewerCamera } = useUIStore()
+  const { setWorkflowStage, viewerCamera, selectCamera, setViewerCamera } = useUIStore()
 
   const [detailValue, setDetailValue] = useState(() =>
     clampDetail(processingConfig.colorCount)
   )
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false)
   const requestSeqRef = useRef(0)
+
+  // Sync camera from SelectStage (Stage 3) to BuildStage (Stage 4) on mount
+  // This ensures the view remains visually identical during the transition.
+  useEffect(() => {
+    console.debug('[BuildStage] Camera sync on mount:', {
+      selectCamera,
+      compositionLocked,
+      normalizedImageDims: normalizedImage ? { width: normalizedImage.width, height: normalizedImage.height } : null,
+      referencePlacement,
+    })
+    setViewerCamera(selectCamera)
+  }, [selectCamera, setViewerCamera, compositionLocked, normalizedImage, referencePlacement])
 
   useEffect(() => {
     setDetailValue(clampDetail(processingConfig.colorCount))
@@ -273,6 +285,7 @@ export function BuildStage() {
           <ColoringBookViewer
             data={coloringBookData}
             hoop={fabricSetup.hoop}
+            referencePlacement={referencePlacement}
             lineWeight={coloringBookLineWeight}
             saturation={coloringBookSaturation}
             outlineIntensity={coloringBookOutlineIntensity}

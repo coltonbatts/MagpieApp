@@ -243,6 +243,8 @@ export interface ColoringBookRegion {
   color: ColoringBookRegionColor
   areaPx: number
   pathSvg: string
+  pathOffsetX?: number
+  pathOffsetY?: number
   holesSvg: string[]
   bbox: ColoringBookRegionBounds
   centroidX: number
